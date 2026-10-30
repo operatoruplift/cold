@@ -1,25 +1,31 @@
+/** Which Host and Origin headers the server answers. */
+export interface Access {
+  hosts: readonly string[];
+  origins: readonly string[];
+}
+
 /**
- * The local UI's only security boundary. The server listens on 127.0.0.1, but
- * any website open in the same browser can still send requests to it, so:
+ * Why a request is refused, or undefined to let it through.
  *
- *  - the Host header must be this server's own (stops DNS rebinding, where a
- *    hostile domain is pointed at 127.0.0.1);
- *  - API calls must carry the `x-cold: 1` header, which a page on another
- *    origin can only send after a CORS preflight this server never grants;
- *  - an Origin header, when present, must be this server's.
+ * - The Host must be one this server is reached at, so a page on another
+ *   domain cannot rebind its DNS name to this server and read its answers.
+ * - API calls must carry `x-cold: 1`. A browser only adds a custom header to a
+ *   cross-site request after a CORS preflight, which this server never
+ *   approves, so other sites cannot call the API with your session.
+ * - An Origin, when the browser sends one, must be this server's.
  *
- * Returns why a request is refused, or undefined when it may proceed. Pure.
+ * /api/health is open to anyone, for a host's uptime checks.
  */
-export function refuseRequest(request: Request, allowedHosts: readonly string[]): string | undefined {
-  const host = request.headers.get("host") ?? "";
-  if (!allowedHosts.includes(host)) return "cold only answers on localhost";
+export function refuseRequest(request: Request, access: Access): string | undefined {
   const { pathname } = new URL(request.url);
+  if (pathname === "/api/health") return undefined;
+  const host = request.headers.get("host") ?? "";
+  if (!access.hosts.includes(host)) return `cold does not answer on ${host || "this address"}`;
   if (!pathname.startsWith("/api/")) return undefined;
   if (request.headers.get("x-cold") !== "1") return "missing the x-cold header";
   const origin = request.headers.get("origin");
-  if (origin && origin !== `http://${host}`) return "cross-origin requests are not allowed";
+  if (origin && !access.origins.includes(origin)) return "cross-origin requests are not allowed";
   return undefined;
 }
 
-/** The hosts this server answers to. */
 export const localHosts = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`] as const;

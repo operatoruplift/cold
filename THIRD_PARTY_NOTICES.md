@@ -36,3 +36,21 @@ SOFTWARE.
 The call scripts `cold call sync` writes use dialer's `agencyScripts` data
 format so they appear in its script viewer; that is interoperability, not
 copied code.
+
+## Inter
+
+The site and the app use [Inter](https://rsms.me/inter/) by Rasmus Andersson,
+served from the [@fontsource-variable/inter](https://fontsource.org/fonts/inter)
+package under the SIL Open Font License 1.1. The wordmark in
+`public/brand/cold-logo*.svg` is set in Inter Display Bold and converted to
+outlines. The license is in the package
+(`node_modules/@fontsource-variable/inter/LICENSE`).
+
+## ListeningKit
+
+The site's motion (cloud banks drifting at three depths, a pinned step section
+with flipping copy, pop-in icons) takes after the
+[ListeningKit](https://github.com/matthewdonsemail-lab/log) landing page (MIT,
+Copyright (c) 2026 ListeningKit Contributors). No code was copied; the
+patterns were rewritten for COLD.
+

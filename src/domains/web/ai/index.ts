@@ -1,0 +1,440 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import {
+  aiConfigured,
+  aiModel,
+  draftMessage,
+  explainError,
+  findProspects,
+  prepCall,
+  researchProspect,
+  triageReply,
+  type AiOffer,
+  type AiProspect,
+  type AiResult,
+  type AiRun,
+  type AiRunKind,
+  type AiSender,
+  type FindResult,
+  type Research,
+  type Triage,
+} from "../../ai";
+import { callSheetData } from "../../call";
+import { getOffer, type Account, type ColdConfig, type Offer } from "../../config";
+import { prepareDmRun } from "../../dm";
+import { prepareEmailRun } from "../../email";
+import { findSequence } from "../../messages";
+import { buildVariables, renderForProspect } from "../../outreach";
+import { parseCsv, type Prospect } from "../../prospects";
+import { twentyClient } from "../../touches";
+import { HttpError, json, readBody, type Route } from "../api";
+import type { WebContext } from "../context";
+
+const offerOf = (offer?: Offer): AiOffer => ({
+  audience: offer?.variables.audience,
+  offer: offer?.variables.offer,
+  outcome: offer?.variables.outcome,
+  pain: offer?.variables.pain,
+  proof: offer?.variables.proof,
+});
+const senderOf = (account: Account): AiSender & { phone?: string } => ({
+  name: account.variables.sender_name ?? account.variables.sender_first_name,
+  company: account.variables.sender_company,
+  voice: account.voice,
+  phone: account.variables.sender_phone,
+});
+const prospectOf = (p: Prospect): AiProspect => ({ name: p.label, ...p.variables });
+
+/** A CSV cell: quoted when it needs to be, and never read as a formula. */
+function cell(value: string | undefined): string {
+  let s = value ?? "";
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+const csvText = (headers: string[], rows: Array<Record<string, string | undefined>>) =>
+  [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h])).join(","))].join("\n") + "\n";
+
+/** The prospect sources the API accepts, as in the main API. */
+const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
+/** Only http(s) links from research reach the page. */
+const httpOnly = (urls: string[] | undefined) => (urls ?? []).filter((u) => /^https?:\/\//i.test(u));
+
+const AI_COLUMNS = ["id", "first_name", "last_name", "title", "company", "email", "phone", "website", "city", "trigger", "linkedin_url", "instagram_handle", "facebook_url", "notes", "sources"];
+const host = (url?: string | null) => (url ? url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]!.toLowerCase() : "");
+
+/**
+ * The AI routes, all behind the login. Finding and researching prospects
+ * search the web and can take minutes, so they run in the background: the
+ * call returns a run id and the app asks /api/ai/runs/:id until it is done.
+ * Drafts, call prep and reply triage answer straight away. Nothing here sends
+ * anything: drafts wait for your approval, and the existing caps, windows and
+ * opt-outs still decide what goes out.
+ */
+export function aiRoutes(ctx: WebContext): Route[] {
+  const store = () => {
+    if (!ctx.ai) throw new HttpError(500, "The AI features need the app database.");
+    return ctx.ai;
+  };
+
+  /** Record a run, answer with its output; failures are recorded and explained. */
+  async function run<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: () => Promise<AiResult<T>>): Promise<{ runId: string; output: T }> {
+    const ai = store();
+    const runId = ai.start(kind, subject, input);
+    try {
+      const result = await work();
+      ai.finish(runId, result);
+      return { runId, output: result.output };
+    } catch (err) {
+      const error = explainError(err);
+      ai.fail(runId, error.message);
+      throw new HttpError(error.status, error.message);
+    }
+  }
+
+  /** Start a run and return at once; the work carries on and lands in the database. */
+  function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: () => Promise<AiResult<T>>): string {
+    const ai = store();
+    const runId = ai.start(kind, subject, input);
+    work()
+      .then((result) => ai.finish(runId, result))
+      .catch((err) => ai.fail(runId, explainError(err).message));
+    return runId;
+  }
+
+  function config(): ColdConfig {
+    const { config: c, error } = ctx.config();
+    if (!c) throw new HttpError(400, error ?? "cold.yaml has problems.");
+    return c;
+  }
+
+  function checkSource(source: string | undefined): string {
+    if (!source || !SOURCE.test(source)) throw new HttpError(400, "Pick a prospect list: a CSV file or a Twenty source.");
+    return source;
+  }
+
+  async function prospectFrom(source: string, key: string): Promise<Prospect> {
+    if (!key) throw new HttpError(400, "Pick a prospect.");
+    checkSource(source);
+    const prospect = (await ctx.prospects(source)).find((p) => p.key === key);
+    if (!prospect) throw new HttpError(404, "That prospect is not on the list any more. Refresh and pick again.");
+    return prospect;
+  }
+
+  const research = (key: string) => store().latest<Research>("research", key)?.output;
+
+  /** The due step of a campaign for one prospect, as the template writes it. */
+  async function dueMessage(campaignId: string, prospectKey: string) {
+    const campaign = ctx.campaigns.get(campaignId);
+    if (!campaign) throw new HttpError(404, "No such campaign.");
+    const c = config();
+    const sequence = findSequence(ctx.library().library, campaign.sequence);
+    if (!sequence) throw new HttpError(400, `There is no sequence "${campaign.sequence}" in the library.`);
+    const account = c.accounts[campaign.account];
+    if (!account) throw new HttpError(400, `There is no account "${campaign.account}".`);
+    const offer = campaign.offer ? c.offers[campaign.offer] : getOffer(c, undefined);
+    const prospects = await ctx.prospects(campaign.source, campaign.where);
+    const touchStore = await ctx.store(c);
+    const plan =
+      sequence.channel === "email"
+        ? (await prepareEmailRun({ sequence, account, offer, prospects, store: touchStore, now: () => ctx.now() })).plan
+        : (await prepareDmRun({ sequence, account, offer, prospects, store: touchStore, now: () => ctx.now() })).plan;
+    const item = plan.due.find((d) => d.prospect.key === prospectKey);
+    if (!item) throw new HttpError(409, "This prospect has nothing due right now.");
+    const found = research(item.prospect.key);
+    const variables = buildVariables(account, offer, item.prospect);
+    // A researched trigger fills an empty {{trigger}}, so the template has its one true personal line.
+    if (!variables.trigger && found?.best_trigger) variables.trigger = found.best_trigger;
+    const rendered = renderForProspect(item.step, variables, item.prospect.key);
+    return { campaign, sequence, account, offer, item, rendered, research: found };
+  }
+
+  return [
+    [
+      "GET",
+      /^\/api\/ai\/status$/,
+      () => {
+        const since = new Date(ctx.now().getTime() - 30 * 86_400_000);
+        return json({
+          configured: aiConfigured(),
+          model: aiModel(),
+          usage: ctx.ai?.usageSince(since),
+          finds: (ctx.ai?.recent("find", 12) ?? []).map((r) => ({ id: r.id, status: r.status, input: r.input, createdAt: r.createdAt, found: (r.output as FindResult | undefined)?.prospects?.length ?? 0, error: r.error })),
+        });
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/ai\/runs\/([\w-]+)$/,
+      (_request, [id]) => {
+        const found = store().get(id!);
+        return found ? json(found) : json({ error: "No such AI run." }, 404);
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/find$/,
+      async (request) => {
+        const body = await readBody<{ offer?: string; area?: string; count?: number; notes?: string; exclude?: string }>(request);
+        const area = body.area?.trim();
+        if (!area) throw new HttpError(400, "Say where to look: a city, a region, or online.");
+        const c = config();
+        const offer = body.offer ? c.offers[body.offer] : getOffer(c, undefined);
+        if (body.offer && !offer) throw new HttpError(400, `There is no offer "${body.offer}".`);
+        const exclude: string[] = [];
+        if (body.exclude) {
+          for (const p of await ctx.prospects(checkSource(body.exclude)).catch(() => [])) {
+            if (p.variables.company) exclude.push(p.variables.company);
+            if (p.variables.website) exclude.push(host(p.variables.website));
+          }
+        }
+        const call = ctx.claude();
+        const count = Math.max(1, Math.min(15, Number(body.count) || 8));
+        const input = { offer: offer?.key, area, count, notes: body.notes, exclude: body.exclude };
+        const runId = background("find", area, input, () => findProspects({ call, offer: offerOf(offer), area, count, notes: body.notes, exclude }));
+        return json({ runId }, 202);
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/prospects\/save$/,
+      async (request) => {
+        const body = await readBody<{ runId: string; picks: number[]; list?: string }>(request);
+        const found = store().get(body.runId);
+        const output = found?.output as FindResult | undefined;
+        if (!found || found.kind !== "find" || !output) throw new HttpError(404, "That search is not finished, or does not exist.");
+        const picked = (body.picks ?? []).map((i) => output.prospects[i]).filter((p): p is NonNullable<typeof p> => !!p);
+        if (!picked.length) throw new HttpError(400, "Pick at least one prospect to save.");
+        const slug = (body.list ?? "ai").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "ai";
+        const file = `prospects-${slug}.csv`;
+        const full = path.join(ctx.root, file);
+        let headers = [...AI_COLUMNS];
+        let rows: Array<Record<string, string | undefined>> = [];
+        if (existsSync(full)) {
+          const [head = [], ...rest] = parseCsv(readFileSync(full, "utf8"));
+          headers = [...head, ...AI_COLUMNS.filter((c) => !head.includes(c))];
+          rows = rest.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
+        }
+        const known = new Set(rows.flatMap((r) => [r.company?.toLowerCase(), host(r.website), r.email?.toLowerCase()]).filter(Boolean));
+        let added = 0;
+        let skipped = 0;
+        for (const p of picked) {
+          if ([p.company.toLowerCase(), host(p.website), p.email?.toLowerCase()].some((k) => k && known.has(k))) {
+            skipped++;
+            continue;
+          }
+          const [first, ...last] = (p.contact_name ?? "").trim().split(/\s+/).filter(Boolean);
+          rows.push({
+            id: `ai-${createHash("sha1").update(`${p.company}|${host(p.website)}`).digest("hex").slice(0, 10)}`,
+            first_name: first,
+            last_name: last.join(" ") || undefined,
+            title: p.contact_title ?? undefined,
+            company: p.company,
+            email: p.email ?? undefined,
+            phone: p.phone ?? undefined,
+            website: p.website ?? undefined,
+            city: p.city ?? undefined,
+            trigger: p.trigger ?? undefined,
+            linkedin_url: p.linkedin_url ?? undefined,
+            instagram_handle: p.instagram_handle ?? undefined,
+            facebook_url: p.facebook_url ?? undefined,
+            notes: p.fit,
+            sources: httpOnly(p.verified_sources?.length ? p.verified_sources : p.sources).join(" "),
+          });
+          [p.company.toLowerCase(), host(p.website), p.email?.toLowerCase()].forEach((k) => k && known.add(k));
+          added++;
+        }
+        writeFileSync(full, csvText(headers, rows));
+        ctx.invalidate();
+        return json({ source: `csv:${file}`, file, added, skipped, total: rows.length });
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/research$/,
+      async (request) => {
+        const body = await readBody<{ source: string; prospect: string; offer?: string }>(request);
+        const prospect = await prospectFrom(body.source, body.prospect);
+        const c = config();
+        const offer = body.offer ? c.offers[body.offer] : getOffer(c, undefined);
+        const call = ctx.claude();
+        const runId = background("research", prospect.key, { source: body.source, prospect: prospect.key, label: prospect.label }, () =>
+          researchProspect({ call, offer: offerOf(offer), prospect: prospectOf(prospect) }),
+        );
+        return json({ runId }, 202);
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/ai\/research$/,
+      (_request, _params, url) => {
+        const keys = (url.searchParams.get("keys") ?? "").split(",").map((k) => k.trim()).filter(Boolean).slice(0, 2000);
+        const latest = store().latestFor<Research>("research", keys);
+        return json(Object.fromEntries([...latest].map(([key, r]) => [key, { runId: r.id, createdAt: r.createdAt, output: r.output }])));
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/research\/apply$/,
+      async (request) => {
+        const body = await readBody<{ source: string; prospect: string; trigger: string }>(request);
+        const trigger = body.trigger?.replace(/\s+/g, " ").trim();
+        if (!trigger) throw new HttpError(400, "There is no trigger to save.");
+        const prospect = await prospectFrom(body.source, body.prospect);
+        if (body.source.startsWith("csv:")) {
+          const file = ctx.resolveSource(body.source).slice(4);
+          // Only your own lists are written to: never the bundled example, never a file outside your folder.
+          const own = path.dirname(path.resolve(file)) === path.resolve(ctx.root) && /^prospects.*\.csv$/i.test(path.basename(file));
+          if (!own) throw new HttpError(400, "Triggers are saved to your own lists (prospects-*.csv). Upload this list or save an AI search as a list, then research it there.");
+          const [head = [], ...rest] = parseCsv(readFileSync(file, "utf8"));
+          const headers = head.includes("trigger") ? head : [...head, "trigger"];
+          const rows = rest.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])) as Record<string, string | undefined>);
+          const idColumn = head.find((h) => h.trim().toLowerCase() === "id");
+          const index = idColumn && prospect.variables.id ? rows.findIndex((r) => r[idColumn]?.trim() === prospect.variables.id) : Number(prospect.key.split(":").pop()) - 1;
+          const target = rows[index] ?? rows.find((r) => r.email?.trim().toLowerCase() === prospect.email);
+          if (!target) throw new HttpError(409, "Could not find that row in the CSV. Add the trigger by hand.");
+          target.trigger = trigger;
+          writeFileSync(file, csvText(headers, rows));
+        } else if (body.source === "twenty:people" && prospect.links.personId) {
+          const client = twentyClient();
+          if (!client) throw new HttpError(400, "Twenty is not connected.");
+          await client.update("people", prospect.links.personId, { coldTrigger: trigger });
+        } else {
+          throw new HttpError(400, "Triggers can be saved to CSV lists and Twenty People. Copy it into your list by hand.");
+        }
+        ctx.invalidate();
+        return json({ ok: true, message: `Saved the trigger for ${prospect.label}.` });
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/draft$/,
+      async (request) => {
+        const body = await readBody<{ campaignId: string; prospect: string }>(request);
+        const due = await dueMessage(body.campaignId, body.prospect);
+        const { campaign, sequence, account, offer, item, rendered } = due;
+        const call = ctx.claude();
+        const step = item.step.step ?? 1;
+        const { runId, output } = await run("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, () =>
+          draftMessage({
+            call,
+            channel: sequence.channel === "email" ? "email" : "dm",
+            sender: senderOf(account),
+            offer: offerOf(offer),
+            prospect: prospectOf(item.prospect),
+            research: due.research,
+            template: { subject: rendered.subject, body: rendered.body },
+            maxChars: item.step.maxChars,
+            threaded: sequence.channel === "email" && !item.first,
+          }),
+        );
+        const saved = store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: output.subject ?? rendered.subject, body: output.body, status: "draft", runId });
+        return json({ draft: saved, changes: output.changes, personalLine: output.personal_line, template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing }, researched: !!due.research });
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/ai\/drafts$/,
+      (_request, _params, url) => json(store().drafts(url.searchParams.get("campaignId") ?? "")),
+    ],
+    [
+      "PUT",
+      /^\/api\/ai\/drafts$/,
+      async (request) => {
+        const body = await readBody<{ campaignId: string; prospect: string; step: number; subject?: string; body: string; status: "draft" | "approved" }>(request);
+        if (!ctx.campaigns.get(body.campaignId)) throw new HttpError(404, "No such campaign.");
+        const text = (body.body ?? "").trim();
+        if (!text) throw new HttpError(400, "The message is empty.");
+        if (/\{\{|\}\}/.test(`${body.subject ?? ""} ${text}`)) throw new HttpError(400, "The message still has a {{variable}} in it. Replace it with real words.");
+        if (body.status !== "draft" && body.status !== "approved") throw new HttpError(400, "Status is draft or approved.");
+        return json(store().saveDraft({ campaignId: body.campaignId, prospectKey: body.prospect, step: Number(body.step) || 1, subject: body.subject?.trim() || undefined, body: text, status: body.status }));
+      },
+    ],
+    [
+      "DELETE",
+      /^\/api\/ai\/drafts$/,
+      (_request, _params, url) => {
+        const p = url.searchParams;
+        return json({ ok: store().deleteDraft(p.get("campaignId") ?? "", p.get("prospect") ?? "", Number(p.get("step")) || 1) });
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/call$/,
+      async (request) => {
+        const body = await readBody<{ script: string; source?: string; prospect?: string; account?: string; offer?: string }>(request);
+        const c = config();
+        const library = ctx.library().library;
+        const script = library.callScripts.find((s) => s.id === body.script);
+        if (!script) throw new HttpError(404, "No such call script.");
+        const account = Object.values(c.accounts).find((a) => (body.account ? a.key === body.account : a.voice === script.voice));
+        if (!account) throw new HttpError(400, `There is no ${script.voice} account in cold.yaml for this script.`);
+        const offer = body.offer ? c.offers[body.offer] : getOffer(c, undefined);
+        const prospect = body.source && body.prospect ? await prospectFrom(body.source, body.prospect) : undefined;
+        const sheet = callSheetData(script, library, account, offer, prospect);
+        const call = ctx.claude();
+        const result = await run("call", prospect?.key ?? script.id, { script: script.id, prospect: prospect?.key }, () =>
+          prepCall({
+            call,
+            sender: senderOf(account),
+            offer: offerOf(offer),
+            prospect: prospect ? prospectOf(prospect) : {},
+            research: prospect ? research(prospect.key) : undefined,
+            script: { title: sheet.title, sections: sheet.sections, objections: sheet.objections },
+          }),
+        );
+        return json({ ...result, researched: !!(prospect && research(prospect.key)) });
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/triage$/,
+      async (request) => {
+        const body = await readBody<{ messageId?: string; prospectKey: string; prospectLabel?: string; subject?: string; body: string; account?: string }>(request);
+        const text = (body.body ?? "").trim();
+        if (!text) throw new HttpError(400, "There is no reply text to read.");
+        const c = config();
+        const account = (body.account && c.accounts[body.account]) || Object.values(c.accounts)[0];
+        if (!account) throw new HttpError(400, "cold.yaml has no accounts.");
+        const subject = body.messageId || createHash("sha1").update(text).digest("hex");
+        const call = ctx.claude();
+        const result = await run<Triage>("triage", subject, { prospect: body.prospectKey, messageId: body.messageId }, () =>
+          triageReply({ call, sender: senderOf(account), offer: offerOf(getOffer(c, undefined)), prospect: { name: body.prospectLabel ?? body.prospectKey }, reply: { subject: body.subject, body: text } }),
+        );
+        return json({ ...result, id: subject });
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/ai\/triage$/,
+      (_request, _params, url) => {
+        const ids = (url.searchParams.get("ids") ?? "").split(",").map((k) => k.trim()).filter(Boolean).slice(0, 1000);
+        const latest = store().latestFor<Triage>("triage", ids);
+        return json(Object.fromEntries([...latest].map(([id, r]) => [id, r.output])));
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/ai\/opt-out$/,
+      async (request) => {
+        const body = await readBody<{ prospectKey: string; prospectLabel?: string; account?: string; sequence?: string; address?: string }>(request);
+        if (!body.prospectKey) throw new HttpError(400, "Which prospect?");
+        const touchStore = await ctx.store(config());
+        await touchStore.record({
+          kind: "OPTED_OUT",
+          channel: "EMAIL",
+          account: body.account,
+          sequence: body.sequence,
+          prospectKey: body.prospectKey,
+          prospectLabel: body.prospectLabel,
+          toAddress: body.address,
+          body: "Recorded from the inbox: they asked not to be contacted.",
+          occurredAt: ctx.now().toISOString(),
+        });
+        return json({ ok: true, message: `${body.prospectLabel ?? body.prospectKey} won't be contacted again on any channel.` });
+      },
+    ],
+  ];
+}
+
+export type { AiRun };

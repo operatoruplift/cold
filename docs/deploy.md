@@ -1,0 +1,128 @@
+# Host COLD
+
+Hosting puts the site and its waitlist on the web, and lets you install the app
+on your phone. It is one container with one volume. Pick any host that runs a
+Dockerfile and keeps a disk: the steps for Railway, Render and Fly are below,
+and any VPS works the same way.
+
+## What the server needs
+
+| Setting | Value |
+|---|---|
+| Build | the `Dockerfile` in this repository |
+| Volume | mounted at `/data` (1 GB is plenty). It holds `cold.yaml`, `.env.local`, the database (waitlist, login, AI drafts), prospect lists and your copy of the message library. |
+| `COLD_PUBLIC_URL` | the address people open, e.g. `https://cold.example.com`. Railway, Render and Fly set it for you from their own domain; set it yourself for a custom domain. |
+| `COLD_ALLOWED_HOSTS` | optional: other host names that reach the same server, comma separated (your platform domain, when `COLD_PUBLIC_URL` is a custom domain) |
+| Port | the server reads `PORT` (default 4100) |
+| Health check | `GET /api/health` |
+| Secrets | optional here: `ANTHROPIC_API_KEY`, `SMTP_URL_*`, `IMAP_URL_*`, `TWENTY_*`. You can also paste them in Settings once you're in; those are saved to `/data/.env.local`. |
+
+Only one instance should run: the login rate limits and running sends live in
+the server's memory, and the database is a file on the volume.
+
+## First start
+
+The logs print a setup link:
+
+```
+First run: create your login at https://cold.example.com/app/?setup=K7QM-2XDP-9TAH
+```
+
+Open it, choose your email and password, and you're in. The code works once,
+until the login exists. To skip the web setup, set the login from the
+environment instead:
+
+```bash
+bun run cold owner hash
+```
+
+and give the server `COLD_OWNER_EMAIL` and `COLD_OWNER_PASSWORD_HASH`. To
+reset a forgotten password on the server, open its shell and run
+`bun run cold owner`.
+
+## Railway
+
+1. New project, Deploy from GitHub repo, pick your fork of `cold`. Railway
+   finds the `Dockerfile`.
+2. Add a volume to the service, mounted at `/data`.
+3. Settings, Networking, Generate Domain (or add your own). Railway passes the
+   domain to COLD as `RAILWAY_PUBLIC_DOMAIN`; for a custom domain set
+   `COLD_PUBLIC_URL`.
+4. Deploy, then open the setup link from the deploy logs.
+
+## Render
+
+1. New, Web Service, from your repository; runtime Docker.
+2. Add a disk mounted at `/data` (disks need a paid instance).
+3. Health check path `/api/health`. Render passes its URL as
+   `RENDER_EXTERNAL_URL`; for a custom domain set `COLD_PUBLIC_URL`.
+4. Deploy, then open the setup link from the logs.
+
+## Fly
+
+```bash
+fly launch --no-deploy
+```
+
+```bash
+fly volumes create cold_data --size 1
+```
+
+Add to the generated `fly.toml`:
+
+```toml
+[mounts]
+  source = "cold_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 4100
+  auto_stop_machines = "off"
+```
+
+```bash
+fly deploy
+```
+
+Fly gives COLD `FLY_APP_NAME`, so `https://<app>.fly.dev` works without
+setting anything. Keep `auto_stop_machines` off: a stopped machine stops a
+send halfway through its batch.
+
+## A VPS
+
+Run it behind a reverse proxy that terminates HTTPS (Caddy does it in two
+lines):
+
+```bash
+docker build -t cold .
+```
+
+```bash
+docker run -d --name cold --restart unless-stopped -p 127.0.0.1:4100:4100 -v cold-data:/data -e COLD_PUBLIC_URL=https://cold.example.com cold
+```
+
+```
+cold.example.com {
+  reverse_proxy 127.0.0.1:4100
+}
+```
+
+## Serverless hosts
+
+Vercel, Netlify and other function hosts are not a fit: COLD keeps a database
+on disk, and a send runs for minutes in the background. Host the container
+somewhere that keeps it running.
+
+## Behind the scenes
+
+- The server answers only on `COLD_PUBLIC_URL`'s host name (and `localhost`),
+  so another domain cannot point at it.
+- Session cookies are `Secure`, `HttpOnly` and `SameSite=Strict`; pages carry a
+  strict Content Security Policy and HSTS.
+- Client addresses for rate limiting come from the last `X-Forwarded-For`
+  entry, the one your host's proxy adds. Set `COLD_TRUST_PROXY=0` if nothing
+  sits in front of COLD.
+- Updates: redeploy. The service worker notices the new version and the app
+  offers to reload. Your files on `/data` stay; the message library there is
+  your copy, so new messages from an update are not copied over it. Compare
+  with the repository's `messages/` if you want them.

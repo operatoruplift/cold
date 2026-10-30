@@ -12,9 +12,10 @@ export function CampaignsPage() {
   const { query } = useLocation();
   const campaigns = useApi<Campaign[]>("/api/campaigns");
   const [creating, setCreating] = useState(query.get("new") === "1");
+  const [source] = useState(query.get("source") ?? undefined);
   const close = () => {
     setCreating(false);
-    setQuery({ new: undefined });
+    setQuery({ new: undefined, source: undefined });
   };
 
   return (
@@ -91,7 +92,7 @@ export function CampaignsPage() {
           </div>
         )}
       </Card>
-      {creating && <CampaignForm onClose={close} onSaved={(c) => navigate(`/campaigns/${c.id}`)} />}
+      {creating && <CampaignForm source={source} onClose={close} onSaved={(c) => navigate(`/campaigns/${c.id}`)} />}
     </>
   );
 }

@@ -1,40 +1,63 @@
-# cold
+<p align="center">
+  <img src="public/brand/cold-logo.svg" alt="COLD" width="260">
+</p>
 
-**Cold call scripts, cold DMs and cold emails for your personal and company
-accounts: open source, written to be sent, with every touch kept in
-[Twenty CRM](https://twenty.com).**
+<h3 align="center">Break the ice. AI outbound, reimagined.</h3>
 
-Built by [Operator Uplift](https://github.com/operatoruplift). It works with
-any Twenty workspace on its own, and alongside
+<p align="center">
+  Cold DMs, cold emails, cold calls and prospect research for your personal and
+  company accounts. Open source, written to be sent, with every touch kept in
+  <a href="https://twenty.com">Twenty CRM</a>.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://bun.sh"><img src="https://img.shields.io/badge/runtime-Bun-000000.svg" alt="Bun"></a>
+  <a href="https://twenty.com"><img src="https://img.shields.io/badge/CRM-Twenty-000000.svg" alt="Twenty CRM"></a>
+  <a href="https://docs.anthropic.com"><img src="https://img.shields.io/badge/AI-Claude-39B8FF.svg" alt="Claude"></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/site.png" alt="The COLD site: Break the ice, with alpine ridges and a waitlist form" width="100%">
+</p>
+
+Built by [Operator Uplift](https://github.com/operatoruplift). COLD is three
+things in one small server:
+
+- **A public site** at `/`, with your waitlist.
+- **Your app** at `/app/`, behind a login only you have: install it on your
+  desktop or phone and it works like a native app.
+- **The engine underneath**: pick a sequence, point it at a list, and COLD
+  works out who is due for which step today. It writes each message with the
+  prospect's details, sends the emails from your own mailbox, lines up the DMs
+  for you to send, and prepares your calls. It stops for anyone who replied,
+  bounced or asked to be left alone, and logs every touch in Twenty.
+
+Claude does the research and the first drafts: it finds businesses that fit
+your offer, reads their public footprint for one true reason to reach out,
+personalizes each message, preps each call and reads each reply. **You approve
+everything.** Nothing is sent by AI on its own, DMs are always sent by you, and
+calls are always made by you.
+
+Every message comes in two voices: **personal**, sent from your own name and
+profiles, and **company**, sent from the brand or a rep. It works with any
+Twenty workspace on its own, and alongside
 [dialer](https://github.com/matthewdonsemail-lab/dialer), the open-source power
 dialer on Twenty: run both on one workspace and they share the prospects, the
 call scripts and the Do Not Contact list.
 
-[![License: MIT](https://img.shields.io/badge/LICENSE-MIT-yellow.svg)](LICENSE)
-[![Bun](https://img.shields.io/badge/runtime-Bun-000000.svg)](https://bun.sh)
-[![Twenty CRM](https://img.shields.io/badge/CRM-Twenty-000000.svg)](https://twenty.com)
-
-<p align="center">
-  <img src="docs/screenshots/today.png" alt="Today: what's sent, what's due per campaign, and the latest activity" width="100%">
-</p>
-
-Pick a sequence, point it at a list, and `cold` works out who is due for which
-step today. It writes each message with the prospect's details, sends the
-emails from your own mailbox, and lines up the DMs for you to send. It stops
-for anyone who replied, bounced or asked to be left alone, and logs every
-touch on the prospect's record in Twenty. Every message comes in two voices:
-**personal**, sent from your own name and profiles, and **company**, sent from
-the brand or a rep. Use it from a web app on your own computer (`bun run ui`)
-or from the command line; both do the same thing.
-
 ## Why it works
 
-- **An app you can use, on your own computer.** `bun run ui` opens it in your
-  browser: campaigns that show who is due today, a Send button with live
-  progress you can stop, a DM queue with Copy and Open buttons, call scripts,
-  the message library with preview and editing, replies, stats and settings.
-  It follows the dialer's design, and your passwords never leave your
-  machine.
+- **An app that's yours alone.** `bun run ui` opens it on your computer, or
+  host it and install it on your phone. Campaigns that show who is due today,
+  a Send button with live progress you can stop, a DM queue with Copy and Open
+  buttons, call scripts, the message library, the inbox, analytics, your
+  waitlist and settings, behind a login only you have. Your mailbox passwords
+  and API keys stay on your machine or your server.
+- **AI that shows its work.** Claude finds prospects and researches them with
+  web search, and every claim comes with the page it was read on. Drafts,
+  call prep and reply answers wait for your approval; nothing goes out on its
+  own.
 - **The messages are the product.** 45 messages across cold email, LinkedIn,
   X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message
@@ -96,39 +119,106 @@ bun run cold preview founder-direct --source csv:examples/prospects.csv --prospe
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/email-send.png" alt="An email campaign mid-send: progress, and who got step 1"></td>
-    <td><img src="docs/screenshots/dm-queue.png" alt="The LinkedIn DM queue: the message written, Copy, Open profile, then what happened"></td>
+    <td><img src="docs/screenshots/home.png" alt="Home: good evening, five quick tiles, and what's due"></td>
+    <td><img src="docs/screenshots/research.png" alt="Prospects: research a list with AI and save one true trigger per person"></td>
   </tr>
   <tr>
-    <td><b>Email campaigns.</b> Who is due, every email written out, then Send. It goes out one at a time with live progress, and you can stop it.</td>
-    <td><b>The DM queue.</b> The next DM written for you. Copy it, open the profile, send it yourself, then press Sent, Replied or Opted out.</td>
+    <td><b>Home.</b> What's sent, replies and opt-outs this week, what's due in each campaign, and a tile for each job: discover, write, call, connect, sequences.</td>
+    <td><b>Prospects.</b> Claude finds businesses that fit your offer (with the pages it read), or researches the people on your lists and suggests one true trigger line for each.</td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/call-scripts.png" alt="Call scripts with sections and objection answers"></td>
-    <td><img src="docs/screenshots/library.png" alt="The message library editor with variables"></td>
+    <td><img src="docs/screenshots/campaign.png" alt="An email campaign: who is due, each email written out, Personalize with AI"></td>
+    <td><img src="docs/screenshots/dm-queue.png" alt="The LinkedIn DM queue: the message written, Personalize with AI, Copy, Open profile"></td>
   </tr>
   <tr>
-    <td><b>Call scripts.</b> Filled in for a prospect, with every objection answer. Sync them into the dialer with one button.</td>
-    <td><b>The library.</b> Read every message filled in for a real prospect, edit it, and save. Saving runs the same lint as CI.</td>
+    <td><b>Email campaigns.</b> Who is due, every email written out, then Send. Personalize any one with AI, edit it, approve it: the approved version goes out, with your footer and opt-out line.</td>
+    <td><b>The DM queue.</b> The next DM written for you (or personalized). Copy it, open the profile, send it yourself, then press Sent, Replied or Opted out.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/calls.png" alt="Calls: scripts, objection answers and AI call prep"></td>
+    <td><img src="docs/screenshots/phone-home.png" alt="COLD on a phone, installed as an app" width="48%"> <img src="docs/screenshots/phone-prospects.png" alt="Prospects on a phone" width="48%"></td>
+  </tr>
+  <tr>
+    <td><b>Calls.</b> Every script and objection answer, filled in for a prospect, plus AI prep: an opener from a true fact, questions, objection answers and a voicemail. You dial.</td>
+    <td><b>On your phone.</b> Install COLD from the browser and it opens full screen, with tabs along the bottom. It keeps working offline for what you've already opened.</td>
   </tr>
 </table>
 
 | Page | What it does |
 |---|---|
-| Today | What's been sent, replies and opt-outs this week, and what's due in each campaign. |
-| Campaigns | A sequence, the account that sends it, an offer and a prospect list (upload a CSV or use Twenty). |
-| Campaign | Due now, waiting, skipped and held back, with reasons. Emails: Send, with live progress. DMs: the queue, plus a checklist download for a VA. |
-| Call scripts | Every script and objection answer, filled in for a prospect. Sync to the dialer. |
-| Message library | Every message, previewed with real data, editable in place. |
-| Replies | Check an inbox for replies, opt-outs and bounces, and see the last 30 days. |
-| Stats | Reply rate per sequence and per message. |
-| Settings | Create `cold.yaml`, edit it (it is checked before saving), set the mailbox URLs and Twenty key, test each connection, and set up Twenty. |
+| Home | What's been sent, replies and opt-outs this week, and what's due in each campaign. |
+| Prospects | Find new prospects with Claude and web search, save them as a list; research a list and save a trigger line per person. |
+| Campaigns | A sequence, the account that sends it, an offer and a prospect list (upload a CSV, use an AI list, or use Twenty). |
+| Campaign | Due now, waiting, skipped and held back, with reasons. Personalize any due message with AI and approve it. Emails: Send, with live progress. DMs: the queue, plus a checklist download for a VA. |
+| Sequences | Every message, previewed with real data, editable in place. |
+| Calls | Every script and objection answer, filled in for a prospect, and AI call prep. Sync scripts to the dialer. |
+| Inbox | Check an inbox for replies, opt-outs and bounces. Claude reads each reply, sorts it (interested, not now, wants out...) and drafts your answer. |
+| Analytics | Reply rate per sequence and per message. |
+| Waitlist | Everyone who joined on your site, with their role and channels. Mark them invited, export a CSV. |
+| Settings | Your login and devices, the AI connection, `cold.yaml` (checked before saving), mailbox URLs, the Twenty key, and a test for each. |
 
-It listens on `127.0.0.1:4100` only (`COLD_UI_PORT` changes the port). It
-refuses requests that come from other websites: it checks the `Host` and
-`Origin` headers and requires its own header on every API call. Mailbox
-passwords and the Twenty key stay in `.env.local`. Keep the app open while a
-send is running; the send stops if the app is closed.
+### The site and the waitlist
+
+<p align="center">
+  <img src="docs/screenshots/site-steps.png" alt="The site's pinned four-step section: discover, write, reach, connect" width="100%">
+</p>
+
+The public site is COLD's landing page: the hero with drifting cloud banks
+and alpine ridges that part as you scroll, a pinned four-step section
+(discover, write, reach, connect) whose copy flips in while the product screen
+slides to match, the product, the principles, and the waitlist. Its motion
+takes after [ListeningKit](https://listeningkit.com)'s site; the brand is
+COLD's (see [docs/brand.md](docs/brand.md)). Signups land on the Waitlist page,
+with a hidden honeypot field and a per-address limit against bots. The site
+needs no JavaScript to read, and honors reduced motion.
+
+### Your login
+
+The app has one owner: you. The first time COLD starts it prints a one-time
+setup code, and opens `/app/?setup=<code>` on your computer, where you choose
+the email and password you'll sign in with. Passwords are hashed with
+argon2id; sessions are random tokens in an `HttpOnly`, `SameSite=Strict`
+cookie (and `Secure` over HTTPS), valid for 30 days of use. After ten tries
+from one address, sign-in waits out the rest of a 15-minute window. Forgot it?
+Reset it where COLD runs:
+
+```bash
+bun run cold owner
+```
+
+### Install it
+
+COLD is a progressive web app: install it once and it has its own icon and
+window, on your desktop and your phone.
+
+- **Desktop (Chrome, Edge, Brave):** the install button in the address bar, or
+  **Install COLD** in the sidebar. Or run `bun run desktop` to open it in its
+  own window straight away.
+- **Mac (Safari):** File, Add to Dock.
+- **iPhone and iPad:** Share, Add to Home Screen.
+- **Android:** the install prompt, or the menu, Install app.
+
+On your own computer that works at `http://localhost:4100/app/`. To use COLD
+from your phone, host it (next section): installing needs HTTPS.
+
+### AI
+
+Add your Anthropic API key (`ANTHROPIC_API_KEY`) under Settings, Connections.
+COLD uses Claude's Opus model unless `COLD_AI_MODEL` names another:
+
+| Job | How it stays honest |
+|---|---|
+| Find prospects | Claude searches the web and reads the pages. Each result lists the pages it came from; a source Claude didn't open in that search is dropped. Contact details are only what the business publishes; email addresses are never guessed. |
+| Research a prospect | Same rules. It suggests a trigger sentence for `{{trigger}}`; a trigger whose source wasn't opened is dropped. Saving writes it into your CSV or Twenty. |
+| Personalize a message | Rewrites one due message using only what's known about the prospect, keeps the offer and the ask, and refuses to leave a `{{variable}}` or exceed a DM's length limit. It's a draft until you approve it. |
+| Call prep | An opener from a true fact, questions, objection answers built on the script's own, a voicemail. For you to say: COLD never dials or speaks with an AI voice. |
+| Reply triage | Sorts a reply (interested, question, not now, not interested, wants out, wrong person, away) and drafts your answer. A request to stop gets a one-click opt-out that keeps them out of every sequence and channel. |
+
+Research runs in the background (a search takes a minute or two) and survives a
+page reload. Every request is recorded with its tokens and searches; Settings
+shows the last 30 days. Requests use Claude's server-side fallback, so one the
+model declines for policy reasons is retried on Anthropic's recommended
+fallback model.
 
 ## Run your own
 
@@ -147,15 +237,33 @@ bun install
 bun run ui
 ```
 
-Your browser opens at http://localhost:4100. Then:
+COLD prints its addresses and a one-time setup code, and your browser opens
+the app at http://localhost:4100/app/ to create your login. The site is at
+http://localhost:4100. Then:
 
 1. **Settings.** Create `cold.yaml` from the example, then replace the example
    sender and offer with yours. Under Connections, add your mailbox's SMTP URL
-   (and IMAP, to read replies) and, optionally, your Twenty URL and key. Press
-   Test sending, then Set up Twenty.
-2. **Campaigns.** New campaign: pick a sequence, the account that sends it, and
-   a prospect list (upload a CSV, or a Twenty source). Open it, read the
-   emails, and press Send. For DMs, work through the queue.
+   (and IMAP, to read replies), your Anthropic API key for the AI features,
+   and, optionally, your Twenty URL and key. Press Test sending, then Set up
+   Twenty.
+2. **Prospects.** Find prospects with AI, or research the list you have.
+3. **Campaigns.** New campaign: pick a sequence, the account that sends it, and
+   a prospect list. Open it, read the emails (personalize the ones that
+   matter), and press Send. For DMs, work through the queue.
+
+`bun run desktop` does the same and opens the app in its own window. On a
+computer it listens on `127.0.0.1:4100` only (`COLD_UI_PORT` changes the
+port), and refuses requests from other websites: it checks the `Host` and
+`Origin` headers and requires its own header on every API call. Keep it running
+while a send is going; the send stops if COLD is closed.
+
+### Host it
+
+To reach COLD from your phone, share the site and collect a waitlist, run it on
+a server with HTTPS: Railway, Render, Fly or any VPS. One container, one volume
+for your files. Set `COLD_PUBLIC_URL` (Railway, Render and Fly fill it in for
+you), deploy, and open the setup link it prints in the logs. Step by step:
+[docs/deploy.md](docs/deploy.md).
 
 ### From the terminal
 
@@ -290,7 +398,10 @@ one Twenty workspace and they share everything:
 | [Reacher](https://github.com/reacherhq/check-if-email-exists) | MIT | Optional, self-hosted: checks an address exists before the first email |
 | [Cal.com](https://github.com/calcom/cal.com) | MIT | Your booking link (`{{booking_url}}`) |
 | [Cap](https://github.com/CapSoftware/Cap) | AGPLv3 | Records the personal videos the video sequences send (`{{video_url}}`) |
-| [Bun](https://bun.sh) | MIT | Runs it, tests it, loads `.env.local` |
+| [Bun](https://bun.sh) | MIT | Runs it, serves it, bundles the site and the app, stores the waitlist and logins in SQLite |
+| [Claude](https://docs.anthropic.com) via [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | MIT (SDK) | Prospect research with web search, drafts, call prep, reply triage |
+| [React](https://react.dev) and [Lucide](https://lucide.dev) | MIT, ISC | The app's interface and icons |
+| [Inter](https://rsms.me/inter/) via [Fontsource](https://fontsource.org) | OFL 1.1 | The type: Inter Display for headings, Inter for everything else |
 
 `cold` talks to Twenty over its API and includes none of its code.
 
@@ -338,7 +449,11 @@ records go to `.cold/touches.jsonl`.
 
 | Command | What it does |
 |---|---|
-| `bun run ui` | The app, at http://localhost:4100 (`--no-open` to not open a browser, `--dev` to rebuild on change) |
+| `bun run ui` | The site and the app on your computer: http://localhost:4100 and /app/ (`--no-open` to not open a browser) |
+| `bun run desktop` | The same, with the app in its own window |
+| `bun run start` | The server without opening anything (what a host runs) |
+| `bun run dev` | Restart on every change, for working on COLD itself |
+| `cold owner` | Create or reset your login (`cold owner hash` prints a hash for `COLD_OWNER_PASSWORD_HASH`) |
 | `cold list` | Every sequence and script, with when to use it |
 | `cold lint` | Check every message; exits 1 on an error |
 | `cold variables` | The variables a message can use |
@@ -386,19 +501,31 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 | Where | What |
 |---|---|
 | `cold.yaml` | Accounts (voice, sender details, mailbox settings, caps, sending window) and offers. Start from `cold.example.yaml`. |
-| `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, optional `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`. |
+| `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, `ANTHROPIC_API_KEY`, optional `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`, or set them in Settings. |
+| `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts (SQLite). |
 | `COLD_CONFIG` | Point at a config file somewhere else. |
+| `COLD_HOME` | Keep `cold.yaml`, `.env.local`, `.cold/`, prospect lists and a copy of `messages/` in another folder (a server's volume). |
+| `COLD_PUBLIC_URL` | Run as a hosted server at this address (see [docs/deploy.md](docs/deploy.md)). |
+| `COLD_OWNER_EMAIL`, `COLD_OWNER_PASSWORD_HASH` | Set the login from the environment instead (`bun run cold owner hash` prints the hash). |
+| `COLD_AI_MODEL` | Another Claude model for the AI features. |
 | `TWENTY_REQUESTS_PER_MINUTE` | Twenty allows 100 a minute per key; `cold` uses 90 unless told otherwise. |
 
 ## Repository layout
 
 ```
 messages/                 the library (see messages/README.md)
+public/                   logos, app icons, the web app manifest, the share image
 src/
   cli.ts                  the cold command
-  web/                    the app: React pages, bundled by Bun
+  site/                   the public site: HTML, CSS and its motion (no framework)
+  web/                    the app: React pages, bundled by Bun, and its service worker
+  ui/                     the font, shared by both
   domains/
-    web/                  the app's server: API, request guard, campaigns, send jobs
+    web/                  the server: site, app and API, login gate, AI routes, campaigns, send jobs
+    auth/                 the owner login: argon2id, sessions, rate limits, setup codes
+    waitlist/             signups from the site
+    ai/                   Claude: finding and researching prospects, drafts, call prep, triage
+    db/                   the SQLite file and its migrations
     messages/             load and lint the library
     render/               the template syntax and the variable contract
     config/               cold.yaml
@@ -411,7 +538,7 @@ src/
     stats/                reply rates
     twenty/               the API client and the schema
     cli/                  terminal input and output
-docs/                     playbook and compliance
+docs/                     playbook, compliance, deploy, brand
 examples/prospects.csv    five fictional prospects
 ```
 

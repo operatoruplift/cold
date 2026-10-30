@@ -63,7 +63,12 @@ export interface ReadyEmail {
   address: string;
   draft: EmailDraft;
   previous?: Touch;
+  /** Written by you (an approved AI draft) rather than straight from the template. */
+  custom?: boolean;
 }
+
+/** Your own words for one prospect's step, used instead of the template. */
+export type EmailOverride = (prospect: Prospect, step: Message) => { subject?: string; body: string } | undefined;
 
 /** Everything about one send before anything is sent. */
 export interface PreparedEmailRun {
@@ -117,7 +122,16 @@ export function smtpTransport(account: Account): MailTransport {
  * that make a send impossible (wrong voice, no postal address, a footer with
  * no opt-out) throw here, before anyone sees a "Send" button.
  */
-export async function prepareEmailRun(input: { sequence: Sequence; account: Account; offer?: Offer; prospects: Prospect[]; store: TouchStore; limit?: number; now?: () => Date }): Promise<PreparedEmailRun> {
+export async function prepareEmailRun(input: {
+  sequence: Sequence;
+  account: Account;
+  offer?: Offer;
+  prospects: Prospect[];
+  store: TouchStore;
+  limit?: number;
+  now?: () => Date;
+  override?: EmailOverride;
+}): Promise<PreparedEmailRun> {
   const { sequence, account, offer, store } = input;
   const now = input.now ?? (() => new Date());
   const email = account.email;
@@ -142,7 +156,10 @@ export async function prepareEmailRun(input: { sequence: Sequence; account: Acco
   for (const item of plan.due) {
     const variables = buildVariables(account, offer, item.prospect);
     const rendered = renderForProspect(item.step, variables, item.prospect.key);
-    if (rendered.missing.length) {
+    const custom = input.override?.(item.prospect, item.step);
+    // An approved draft replaces the template's words; the footer, opt-out and threading stay COLD's.
+    const subjectMissing = rendered.missing.some((name) => (item.step.subject ?? "").includes(`{{${name}`));
+    if (custom ? !custom.subject && subjectMissing : rendered.missing.length > 0) {
       held.push({ prospect: item.prospect, step: item.step, missing: rendered.missing });
       continue;
     }
@@ -150,8 +167,8 @@ export async function prepareEmailRun(input: { sequence: Sequence; account: Acco
     const draft = buildEmail({
       from: email.from,
       to: item.address,
-      subject: rendered.subject,
-      body: rendered.body,
+      subject: custom?.subject || rendered.subject,
+      body: custom?.body ?? rendered.body,
       footer: footer.text,
       first: item.first,
       previous: item.previous,
@@ -159,7 +176,7 @@ export async function prepareEmailRun(input: { sequence: Sequence; account: Acco
       unsubscribeUrl,
       timeZone: email.window?.timezone,
     });
-    ready.push({ prospect: item.prospect, step: item.step, address: item.address, draft, previous: item.previous });
+    ready.push({ prospect: item.prospect, step: item.step, address: item.address, draft, previous: item.previous, custom: !!custom });
   }
 
   const sentToday = (await store.since(startOfDay(now(), email.window?.timezone), { account: account.key, channel: "EMAIL", kind: "SENT" })).length;

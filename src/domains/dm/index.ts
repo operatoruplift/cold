@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import type { Account, Offer } from "../config";
 import { bold, countReasons, dim, green, indent, red, yellow, type Io } from "../cli/io";
 import type { Message, Platform, Sequence } from "../messages";
@@ -48,6 +50,25 @@ export const systemDesktop = {
     if (process.platform === "darwin") run("open", [url]);
     else if (process.platform === "win32") run("cmd", ["/c", "start", "", url]);
     else run("xdg-open", [url]);
+  },
+  /**
+   * Open a page as an app in its own window, without tabs or an address bar
+   * (the --app mode of Chrome, Edge and Brave). Falls back to a normal tab.
+   * Returns what opened it.
+   */
+  openWindow(url: string): string {
+    const flag = `--app=${url}`;
+    if (process.platform === "darwin") {
+      for (const app of ["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"]) {
+        if ([`/Applications/${app}.app`, path.join(homedir(), "Applications", `${app}.app`)].some((p) => existsSync(p)) && run("open", ["-na", app, "--args", flag])) return app;
+      }
+    } else if (process.platform === "win32") {
+      if (run("cmd", ["/c", "start", "", "msedge", flag])) return "Microsoft Edge";
+    } else {
+      for (const bin of ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "brave-browser"]) if (Bun.which(bin) && run(bin, [flag])) return bin;
+    }
+    this.open(url);
+    return "your browser";
   },
   copy(text: string): boolean {
     const tools: Array<[string, string[]]> =

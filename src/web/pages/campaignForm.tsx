@@ -8,7 +8,7 @@ import { Button, ErrorNotice, Field, Modal } from "../ui/kit";
 import { useToast } from "../ui/toast";
 
 /** New or edit campaign: a sequence, the account that sends it, an offer, a prospect list. */
-export function CampaignForm({ campaign, onClose, onSaved }: { campaign?: Campaign; onClose: () => void; onSaved: (c: Campaign) => void }) {
+export function CampaignForm({ campaign, source, onClose, onSaved }: { campaign?: Campaign; source?: string; onClose: () => void; onSaved: (c: Campaign) => void }) {
   const status = useStatus();
   const library = useApi<LibraryResponse>("/api/library");
   const sources = useApi<SourceOption[]>("/api/sources");
@@ -18,7 +18,7 @@ export function CampaignForm({ campaign, onClose, onSaved }: { campaign?: Campai
     sequence: campaign?.sequence ?? "",
     account: campaign?.account ?? "",
     offer: campaign?.offer ?? status.data?.defaultOffer,
-    source: campaign?.source ?? "csv:examples/prospects.csv",
+    source: campaign?.source ?? source ?? "csv:examples/prospects.csv",
     where: campaign?.where,
   });
   const [error, setError] = useState<ApiError>();

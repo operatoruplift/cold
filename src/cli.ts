@@ -16,6 +16,10 @@ import { exampleVariables, VARIABLES } from "./domains/render";
 import { rate, summarize } from "./domains/stats";
 import { openStore, TOUCH_CHANNELS, TOUCH_KINDS, twentyClient, type Touch } from "./domains/touches";
 import { applySchema, type ApplyItem } from "./domains/twenty";
+import path from "node:path";
+import { emailProblem, OwnerAuth, passwordProblem } from "./domains/auth";
+import { ROOT } from "./domains/config";
+import { openDatabase } from "./domains/db";
 
 const HELP = `${bold("cold")}: cold calls, cold DMs and cold emails for personal and company accounts
 
@@ -42,6 +46,10 @@ ${bold("Calls")}
   cold call sync [--account <a>] [--offer <o>] [--campaign <name>] [--dry-run]
   cold call sheet <script> [--account <a>] [--offer <o>] [--source <src> --prospect <who>]
 
+${bold("Login")} (for the app at /app/)
+  cold owner [--email <you@x.com>]  create or reset your login, then sign in with it
+  cold owner hash                   print a password hash for COLD_OWNER_PASSWORD_HASH
+
 ${bold("Results")}
   cold stats [--days 30] [--account <a>]
   cold log <prospect> --kind <kind> --channel <channel> [--source <src>] [--account <a>]
@@ -59,6 +67,7 @@ const { values: flags, positionals } = (() => {
       allowPositionals: true,
       options: {
         channel: { type: "string" },
+        email: { type: "string" },
         voice: { type: "string" },
         source: { type: "string" },
         prospect: { type: "string" },
@@ -391,6 +400,68 @@ async function log(who: string | undefined): Promise<number> {
   return 0;
 }
 
+// ---------------------------------------------------------------- owner
+
+/** Read a line without echoing it (a password). Piped input is read as is, for scripts. */
+async function secret(question: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    for await (const line of console) return line.trim();
+    return "";
+  }
+  process.stdout.write(question);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  return new Promise((resolve) => {
+    let value = "";
+    const onData = (chunk: Buffer) => {
+      for (const ch of chunk.toString("utf8")) {
+        if (ch === "\r" || ch === "\n") {
+          process.stdin.setRawMode(false);
+          process.stdin.pause();
+          process.stdin.off("data", onData);
+          process.stdout.write("\n");
+          return resolve(value);
+        }
+        if (ch === "\u0003") process.exit(130);
+        value = ch === "\u007f" ? value.slice(0, -1) : value + ch;
+      }
+    };
+    process.stdin.on("data", onData);
+  });
+}
+
+async function owner(sub: string | undefined): Promise<number> {
+  if (sub === "hash") {
+    const password = await secret("Password to hash: ");
+    const problem = passwordProblem(password);
+    if (problem) throw new UsageError(problem);
+    io.log(await Bun.password.hash(password, { algorithm: "argon2id" }));
+    io.log(dim("Set it as COLD_OWNER_PASSWORD_HASH, with your address as COLD_OWNER_EMAIL, where the server runs."));
+    return 0;
+  }
+  if (sub) throw new UsageError(`Unknown: cold owner ${sub}. Use \`cold owner\` or \`cold owner hash\`.`);
+  const auth = new OwnerAuth(openDatabase(path.join(ROOT, ".cold", "cold.db")), { envOwner: OwnerAuth.envOwner() });
+  const current = auth.owner();
+  if (current?.managedByEnv) throw new UsageError("The login is set by COLD_OWNER_EMAIL and COLD_OWNER_PASSWORD_HASH; change those instead.");
+  let email = flags.email?.trim() ?? "";
+  if (!email) {
+    if (!io.interactive) throw new UsageError("Pass --email, and the password on standard input.");
+    const rl = (await import("node:readline/promises")).createInterface({ input: process.stdin, output: process.stdout });
+    email = (await rl.question(`Email${current ? ` [${current.email}]` : ""}: `)).trim() || current?.email || "";
+    rl.close();
+  }
+  const emailIssue = emailProblem(email.toLowerCase());
+  if (emailIssue) throw new UsageError(emailIssue);
+  const password = await secret("New password (12+ characters): ");
+  const problem = passwordProblem(password);
+  if (problem) throw new UsageError(problem);
+  if (process.stdin.isTTY && (await secret("Again: ")) !== password) throw new UsageError("The two passwords are not the same.");
+  await auth.setOwner(email, password);
+  io.log(`${green(current ? "Login reset" : "Login created")} for ${email.toLowerCase()}. Every old session is signed out.`);
+  io.log(dim(`Sign in at /app/ on your COLD server (local: http://localhost:${process.env.COLD_UI_PORT || 4100}/app/).`));
+  return 0;
+}
+
 // ---------------------------------------------------------------- main
 
 async function main(): Promise<number> {
@@ -424,6 +495,8 @@ async function main(): Promise<number> {
       return stats();
     case "log":
       return log(sub);
+    case "owner":
+      return owner(sub);
     default:
       throw new UsageError(`Unknown command "${command}". Run \`bun run cold help\`.`);
   }

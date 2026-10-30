@@ -7,13 +7,20 @@ import type { Account, ColdConfig, Offer } from "./types";
 export * from "./types";
 export * from "./helpers";
 
-/** The repository root (where cold.yaml lives). */
-export const ROOT = path.resolve(import.meta.dir, "../../..");
+/** The repository: the example config, examples/ and the bundled message library. */
+export const APP_ROOT = path.resolve(import.meta.dir, "../../..");
+
+/**
+ * Where your own files live: cold.yaml, .env.local, .cold/ and prospect lists.
+ * The repository, unless COLD_HOME points somewhere else (a server's volume).
+ * COLD_HOME has to be in the real environment, since .env.local lives inside it.
+ */
+export const ROOT = process.env.COLD_HOME ? path.resolve(process.env.COLD_HOME) : APP_ROOT;
 
 /** Where cold.yaml is (COLD_CONFIG wins), and the example used when it does not exist yet. */
 export function configPaths(root = ROOT): { file: string; example: string } {
   const explicit = process.env.COLD_CONFIG;
-  return { file: explicit ? path.resolve(explicit) : path.join(root, "cold.yaml"), example: path.join(root, "cold.example.yaml") };
+  return { file: explicit ? path.resolve(explicit) : path.join(root, "cold.yaml"), example: path.join(APP_ROOT, "cold.example.yaml") };
 }
 
 /** Parse and validate one config file. Throws with every problem listed. */

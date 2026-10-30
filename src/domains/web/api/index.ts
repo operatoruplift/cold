@@ -3,9 +3,9 @@ import path from "node:path";
 import { parse } from "yaml";
 import { callSheetData, syncCallScripts } from "../../call";
 import type { Io } from "../../cli/io";
-import { getOffer, parseConfig, type Account, type ColdConfig, type Offer } from "../../config";
+import { APP_ROOT, configPaths, getOffer, parseConfig, type Account, type ColdConfig, type Offer } from "../../config";
 import { dmChecklist, prepareDmRun, recordDmOutcome, type DmOutcome } from "../../dm";
-import { describeWindow, prepareEmailRun, reacherFromEnv, sendEmails, smtpTransport, syncReplies, testImap } from "../../email";
+import { describeWindow, prepareEmailRun, reacherFromEnv, sendEmails, smtpTransport, syncReplies, testImap, type EmailOverride } from "../../email";
 import { findMessage, findSequence, lintMessage, lintSequences, toMessage, toSequences, type Library, type Message } from "../../messages";
 import { buildVariables, renderForProspect } from "../../outreach";
 import { findProspect, parseCsv, type Prospect } from "../../prospects";
@@ -30,7 +30,7 @@ import type {
   StatusResponse,
 } from "../types";
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -40,18 +40,21 @@ class HttpError extends Error {
   }
 }
 
-const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
+export const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
 const MESSAGE_ID = /^(email|dm)\/(personal|company)\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d+-[a-z0-9]+(?:-[a-z0-9]+)*$|^call\/(personal|company)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
 const ANSI = /\x1b\[[0-9;]*m/g;
 
-async function readBody<T>(request: Request): Promise<T> {
+export async function readBody<T>(request: Request): Promise<T> {
   try {
     return (await request.json()) as T;
   } catch {
     throw new HttpError(400, "The request body must be JSON.");
   }
 }
+
+/** One API route: method, path pattern (its groups become params), handler. */
+export type Route = [string, RegExp, (request: Request, params: string[], url: URL) => Promise<Response> | Response];
 
 /** An Io that keeps what a runner prints, without terminal colours. */
 function collectingIo(): Io & { lines: string[] } {
@@ -73,6 +76,7 @@ function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
     if (a.email) fields.set(a.email.smtpUrlEnv, `SMTP for ${a.key}: smtps://you%40domain.com:app-password@smtp.gmail.com:465`);
     if (a.email?.imapUrlEnv) fields.set(a.email.imapUrlEnv, `IMAP for ${a.key}: imaps://you%40domain.com:app-password@imap.gmail.com:993`);
   }
+  fields.set("ANTHROPIC_API_KEY", "For the AI features: finding and researching prospects, drafts, call prep, reply triage (console.anthropic.com, API keys)");
   fields.set("REACHER_URL", "Optional: a self-hosted Reacher, e.g. http://localhost:8080");
   fields.set("REACHER_SECRET", "Optional: Reacher's header secret");
   return [...fields.entries()].map(([name, hint]) => ({ name, set: !!process.env[name]?.trim(), hint }));
@@ -92,7 +96,7 @@ function writeEnvFile(file: string, values: Record<string, string>): void {
   writeFileSync(file, `${lines.filter((l, i) => l.trim() || i < lines.length - 1).join("\n").trim()}\n`);
 }
 
-export function createApi(ctx: WebContext): (request: Request) => Promise<Response> {
+export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request: Request) => Promise<Response> {
   const relative = (file: string) => {
     const rel = path.relative(ctx.root, file);
     return rel && !rel.startsWith("..") ? rel : file;
@@ -142,7 +146,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
     if (isExample) blockers.push("cold.yaml does not exist yet, so these would go out as the example sender. Create it in Settings.");
 
     if (sequence.channel === "email") {
-      const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, now });
+      const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, now, override: emailOverride(campaign) });
       const email = account.email!;
       if (!process.env[email.smtpUrlEnv]?.trim()) blockers.push(`The mailbox is not connected: set ${email.smtpUrlEnv} in Settings.`);
       if (prepared.batch.length === 0 && prepared.ready.length > 0) blockers.push(`The daily cap of ${prepared.dailyCap} is used up for today.`);
@@ -152,7 +156,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
         sequence: { id: sequence.id, steps: sequence.steps.length },
         account: { key: account.key, voice: account.voice, from: email.from },
         prospects: prospects.length,
-        due: prepared.ready.map((r) => row(r.prospect, { address: r.address, step: r.step.step, stepTitle: r.step.title, when: r.step.when, subject: r.draft.subject, text: r.draft.text })),
+        due: prepared.ready.map((r) => row(r.prospect, { address: r.address, step: r.step.step, stepTitle: r.step.title, when: r.step.when, subject: r.draft.subject, text: r.draft.text, custom: r.custom })),
         held: prepared.held.map((h) => row(h.prospect, { step: h.step.step, stepTitle: h.step.title, reason: `missing ${h.missing.map((m) => `{{${m}}}`).join(", ")}` })),
         waiting: prepared.plan.waiting.map((w) => row(w.prospect, { step: w.step.step, stepTitle: w.step.title, dueOn: w.dueOn })),
         skipped: prepared.plan.skipped.map((s) => row(s.prospect, { reason: s.reason })),
@@ -165,7 +169,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
       };
     }
 
-    const prepared = await prepareDmRun({ sequence, account, offer, prospects, store, now });
+    const prepared = withDmDrafts(await prepareDmRun({ sequence, account, offer, prospects, store, now }), campaign);
     if (prepared.batch.length === 0 && prepared.queue.length > 0) blockers.push(`The daily cap of ${prepared.cap} on this platform is used up for today.`);
     return {
       campaign,
@@ -174,7 +178,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
       sequence: { id: sequence.id, steps: sequence.steps.length },
       account: { key: account.key, voice: account.voice },
       prospects: prospects.length,
-      due: prepared.queue.map((q) => row(q.prospect, { address: q.url, url: q.url, step: q.step.step, stepTitle: q.step.title, when: q.step.when, text: q.text })),
+      due: prepared.queue.map((q) => row(q.prospect, { address: q.url, url: q.url, step: q.step.step, stepTitle: q.step.title, when: q.step.when, text: q.text, custom: (q as { custom?: boolean }).custom })),
       held: prepared.held.map((h) => row(h.prospect, { step: h.step.step, stepTitle: h.step.title, reason: h.reason })),
       waiting: prepared.plan.waiting.map((w) => row(w.prospect, { step: w.step.step, stepTitle: w.step.title, dueOn: w.dueOn })),
       skipped: prepared.plan.skipped.map((s) => row(s.prospect, { reason: s.reason })),
@@ -185,7 +189,24 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
     };
   }
 
-  const routes: Array<[string, RegExp, (request: Request, params: string[], url: URL) => Promise<Response> | Response]> = [
+  /** Approved AI drafts replace the template's words for that prospect's step. */
+  const emailOverride = (campaign: Campaign): EmailOverride | undefined => {
+    const ai = ctx.ai;
+    if (!ai) return undefined;
+    return (prospect, step) => {
+      const draft = ai.approved(campaign.id, prospect.key, step.step ?? 1);
+      return draft ? { subject: draft.subject, body: draft.body } : undefined;
+    };
+  };
+  const withDmDrafts = <T extends { queue: Array<{ prospect: { key: string }; step: { step?: number }; text: string; custom?: boolean }> }>(prepared: T, campaign: Campaign): T => {
+    for (const item of prepared.queue) {
+      const draft = ctx.ai?.approved(campaign.id, item.prospect.key, item.step.step ?? 1);
+      if (draft) Object.assign(item, { text: draft.body, custom: true });
+    }
+    return prepared;
+  };
+
+  const routes: Route[] = [
     [
       "GET",
       /^\/api\/status$/,
@@ -326,7 +347,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
         const sources: SourceOption[] = [];
         const csvs = readdirSync(ctx.root).filter((f) => /^prospects.*\.csv$/i.test(f));
         for (const f of csvs) sources.push({ id: `csv:${f}`, label: f, kind: "csv" });
-        if (existsSync(path.join(ctx.root, "examples/prospects.csv"))) sources.push({ id: "csv:examples/prospects.csv", label: "examples/prospects.csv (5 fictional prospects)", kind: "csv" });
+        if (existsSync(path.join(ctx.root, "examples/prospects.csv")) || existsSync(path.join(APP_ROOT, "examples/prospects.csv"))) sources.push({ id: "csv:examples/prospects.csv", label: "examples/prospects.csv (5 fictional prospects)", kind: "csv" });
         if (twentyConfigFromEnv()) {
           sources.push({ id: "twenty:people", label: "Twenty: People", kind: "twenty" });
           sources.push({ id: "twenty:agencyProspects", label: "Twenty: dialer prospects (businesses)", kind: "twenty" });
@@ -366,6 +387,10 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
           instagramHandle: p.instagramHandle,
           doNotContact: p.doNotContact,
           hasTrigger: !!p.variables.trigger,
+          trigger: p.variables.trigger,
+          company: p.variables.company,
+          city: p.variables.city,
+          website: p.variables.website,
         }));
         return json({ total: prospects.length, prospects: summaries });
       },
@@ -408,7 +433,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
         if (ctx.jobs.running(account.key)) throw new HttpError(409, `Already sending from ${account.key}. Wait for it to finish, or stop it.`);
         const store = await ctx.store(config);
         const prospects = await ctx.prospects(campaign.source, campaign.where);
-        const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, limit: typeof limit === "number" && limit > 0 ? limit : undefined, now: () => ctx.now() });
+        const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, limit: typeof limit === "number" && limit > 0 ? limit : undefined, now: () => ctx.now(), override: emailOverride(campaign) });
         if (prepared.batch.length === 0) throw new HttpError(409, "Nothing to send right now.");
         if (prepared.windowOpen === false && !ignoreWindow) throw new HttpError(409, `Outside the sending window (${prepared.windowText}). Tick "Send anyway" to override.`);
         const transport = ctx.options.transport?.(account) ?? smtpTransport(account);
@@ -444,7 +469,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
         if (isExample) throw new HttpError(409, "cold.yaml does not exist yet: create it in Settings so DMs are signed and logged as you.");
         const { sequence, account, offer } = resolveCampaign(campaign, ctx.library().library, config);
         const store = await ctx.store(config);
-        const prepared = await prepareDmRun({ sequence, account, offer, prospects: await ctx.prospects(campaign.source, campaign.where), store, now: () => ctx.now() });
+        const prepared = withDmDrafts(await prepareDmRun({ sequence, account, offer, prospects: await ctx.prospects(campaign.source, campaign.where), store, now: () => ctx.now() }), campaign);
         const item = prepared.queue.find((q) => q.prospect.key === prospect);
         if (!item) throw new HttpError(409, "That DM is no longer due. Refresh the page.");
         if (outcome === "SENT" && !prepared.batch.includes(item)) throw new HttpError(409, `The daily cap of ${prepared.cap} is used up for today.`);
@@ -460,7 +485,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
         const config = ctx.requireConfig();
         const { sequence, account, offer } = resolveCampaign(campaign, ctx.library().library, config);
         if (sequence.channel !== "dm") throw new HttpError(400, "Checklists are for DM campaigns.");
-        const prepared = await prepareDmRun({ sequence, account, offer, prospects: await ctx.prospects(campaign.source, campaign.where), store: await ctx.store(config), now: () => ctx.now() });
+        const prepared = withDmDrafts(await prepareDmRun({ sequence, account, offer, prospects: await ctx.prospects(campaign.source, campaign.where), store: await ctx.store(config), now: () => ctx.now() }), campaign);
         return new Response(dmChecklist(prepared, ctx.now()), {
           headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="${campaign.name.replace(/[^\w-]+/g, "-")}-dms.md"`, "cache-control": "no-store" },
         });
@@ -556,7 +581,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
       "GET",
       /^\/api\/settings$/,
       () => {
-        const { file, example } = { ...ctx.config(), example: path.join(ctx.root, "cold.example.yaml") };
+        const { file, example } = { ...ctx.config(), example: configPaths(ctx.root).example };
         const target = process.env.COLD_CONFIG ? path.resolve(process.env.COLD_CONFIG) : path.join(ctx.root, "cold.yaml");
         const exists = existsSync(target);
         const yaml = readFileSync(exists ? target : example, "utf8");
@@ -637,7 +662,7 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
       () => {
         const target = process.env.COLD_CONFIG ? path.resolve(process.env.COLD_CONFIG) : path.join(ctx.root, "cold.yaml");
         if (existsSync(target)) throw new HttpError(409, `${relative(target)} already exists.`);
-        writeFileSync(target, readFileSync(path.join(ctx.root, "cold.example.yaml"), "utf8"));
+        writeFileSync(target, readFileSync(configPaths(ctx.root).example, "utf8"));
         ctx.invalidate();
         return json({ ok: true, message: `Created ${relative(target)} from the example. Now put your own details in it.` } satisfies ActionResponse);
       },
@@ -657,6 +682,8 @@ export function createApi(ctx: WebContext): (request: Request) => Promise<Respon
       },
     ],
   ];
+
+  routes.push(...extraRoutes);
 
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);

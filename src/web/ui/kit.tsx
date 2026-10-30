@@ -5,7 +5,7 @@ import type { ApiError } from "../lib/api";
 export type Tone = "blue" | "green" | "red" | "amber" | "purple" | "teal" | "gray";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "primary" | "success" | "danger" | "ghost";
+  variant?: "default" | "primary" | "success" | "danger" | "ghost" | "dark" | "ai";
   size?: "sm" | "md" | "lg";
   icon?: LucideIcon;
   loading?: boolean;

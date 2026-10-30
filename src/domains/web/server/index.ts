@@ -1,46 +1,79 @@
 #!/usr/bin/env bun
 /**
- * The local web UI: `bun run ui`, then http://localhost:4100.
+ * The COLD server: `bun run ui` on your computer, `bun run start` on a host.
  *
- * Listens on 127.0.0.1 only. The page and its API run in this one process,
- * with your mailbox passwords and Twenty key read from .env.local as the CLI
- * does. Flags: --no-open (do not open a browser), --dev (rebuild on change).
- * COLD_UI_PORT picks another port.
+ *   /        the public site, with the waitlist
+ *   /app/    the app (installable as a desktop or phone app), behind your login
+ *   /api/    its JSON API; everything but signing in and the waitlist needs the login
+ *
+ * On your computer it listens on 127.0.0.1 only. Set COLD_PUBLIC_URL to run
+ * it as a hosted server (see docs/deploy.md). The first start prints a
+ * one-time setup code for creating your login. Flags: --no-open, and
+ * --window to open the app in its own window (`bun run desktop`).
  */
-import index from "../../../web/index.html";
-import { loadEnvFiles, ROOT } from "../../config";
+import path from "node:path";
+import { OwnerAuth } from "../../auth";
+import { APP_ROOT, loadEnvFiles, ROOT } from "../../config";
+import { openDatabase } from "../../db";
 import { systemDesktop } from "../../dm";
-import { MESSAGES_DIR } from "../../messages";
+import { MESSAGES_DIR, seedMessages } from "../../messages";
+import { Waitlist } from "../../waitlist";
+import { aiRoutes } from "../ai";
 import { createApi } from "../api";
 import { WebContext } from "../context";
-import { localHosts, refuseRequest } from "../guard";
+import { buildAssets } from "./assets";
+import { clientAddress, createHandler, SetupCode } from "./handler";
+import { serverSettings } from "./settings";
 
 loadEnvFiles();
+seedMessages();
 const args = new Set(process.argv.slice(2));
-const port = Number(process.env.COLD_UI_PORT) || 4100;
-const hosts = localHosts(port);
-const api = createApi(new WebContext({ root: ROOT, messagesDir: MESSAGES_DIR }));
+let settings: ReturnType<typeof serverSettings>;
+try {
+  settings = serverSettings();
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
+}
+const db = openDatabase(path.join(ROOT, ".cold", "cold.db"));
+const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
+const waitlist = new Waitlist(db);
+const ctx = new WebContext({ root: ROOT, messagesDir: MESSAGES_DIR, db });
+const assets = await buildAssets({ appRoot: APP_ROOT, publicUrl: settings.publicUrl });
+const appUrl = new URL("/app/", settings.publicUrl).href;
+const setup = new SetupCode((code) => {
+  console.log(`\nFirst run: create your login at ${appUrl}?setup=${code}`);
+  console.log(`(setup code ${code}; it only works until the login exists)\n`);
+});
+
+let server: ReturnType<typeof Bun.serve>;
+const handler = createHandler({
+  settings,
+  assets,
+  auth,
+  waitlist,
+  privateApi: createApi(ctx, aiRoutes(ctx)),
+  setup,
+  clientIp: clientAddress(settings.trustProxy, (request) => server.requestIP(request)?.address),
+});
 
 try {
-  Bun.serve({
-    hostname: "127.0.0.1",
-    port,
-    development: args.has("--dev") ? { hmr: true } : false,
-    routes: {
-      "/api/*": (request) => {
-        const reason = refuseRequest(request, hosts);
-        return reason ? new Response(reason, { status: 403 }) : api(request);
-      },
-      "/*": index,
-    },
-    fetch: () => new Response("Not found", { status: 404 }),
-  });
+  // AI research can take a couple of minutes, so keep quiet connections open longer than Bun's 10 seconds.
+  server = Bun.serve({ hostname: settings.hostname, port: settings.port, idleTimeout: 240, fetch: handler });
 } catch (err) {
-  console.error(`cold could not start on port ${port}: ${(err as Error).message}`);
+  console.error(`cold could not start on port ${settings.port}: ${(err as Error).message}`);
   console.error("Another program may be using it. Set COLD_UI_PORT to another port, e.g. COLD_UI_PORT=4200 bun run ui");
   process.exit(1);
 }
 
-const url = `http://localhost:${port}`;
-console.log(`cold is running at ${url}   (Ctrl+C to stop)`);
-if (!args.has("--no-open")) systemDesktop.open(url);
+console.log(`cold is running at ${settings.publicUrl.href}   (Ctrl+C to stop)`);
+console.log(`  site  ${settings.publicUrl.href}`);
+console.log(`  app   ${appUrl}`);
+if (settings.mode === "hosted") console.log(`  data  ${ROOT}`);
+const firstRun = !auth.owner();
+const code = firstRun ? setup.issue() : undefined;
+if (settings.mode === "local" && !args.has("--no-open")) {
+  const target = code ? `${appUrl}?setup=${code}` : appUrl;
+  if (args.has("--window")) console.log(`  opened in ${systemDesktop.openWindow(target)}`);
+  else systemDesktop.open(target);
+}

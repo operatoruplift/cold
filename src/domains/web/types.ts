@@ -2,11 +2,13 @@
  * The JSON the local UI's API speaks. Types only: the browser imports this
  * file with `import type`, so nothing here may be a runtime value.
  */
+import type { Owner, SessionInfo } from "../auth";
 import type { CallSheet } from "../call";
 import type { EmailEvent, EmailRunResult } from "../email";
 import type { LintIssue, Platform, Voice } from "../messages";
 import type { ApplyReport } from "../twenty";
 import type { Touch } from "../touches";
+import type { WaitlistCounts, WaitlistEntry } from "../waitlist";
 
 /** A saved pairing of a sequence, the account that sends it, an offer and a prospect list. */
 export interface Campaign {
@@ -100,6 +102,10 @@ export interface ProspectSummary {
   instagramHandle?: string;
   doNotContact: boolean;
   hasTrigger: boolean;
+  trigger?: string;
+  company?: string;
+  city?: string;
+  website?: string;
 }
 
 /** One person in a campaign plan, with whatever applies to their list. */
@@ -115,6 +121,8 @@ export interface PlanRow {
   url?: string;
   reason?: string;
   dueOn?: string;
+  /** An approved AI draft goes out instead of the template. */
+  custom?: boolean;
 }
 
 export interface PlanResponse {
@@ -178,4 +186,32 @@ export interface ActionResponse {
   message: string;
   lines?: string[];
   report?: ApplyReport;
+}
+
+/** Who is signed in, and whether the owner login still has to be created. */
+export interface SessionResponse {
+  signedIn: boolean;
+  /** Only when signed in. */
+  owner?: Owner;
+  setupRequired: boolean;
+  mode: "local" | "hosted";
+  version: string;
+}
+
+export interface SessionsResponse {
+  sessions: SessionInfo[];
+}
+
+export interface WaitlistResponse {
+  entries: WaitlistEntry[];
+  counts: WaitlistCounts;
+}
+
+export type { Owner, SessionInfo, WaitlistCounts, WaitlistEntry };
+
+export interface AiStatusResponse {
+  configured: boolean;
+  model: string;
+  usage?: { runs: number; inputTokens: number; outputTokens: number; searches: number };
+  finds: Array<{ id: string; status: "running" | "done" | "failed"; input: { area?: string; count?: number; offer?: string }; createdAt: string; found: number; error?: string }>;
 }

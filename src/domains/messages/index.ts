@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { lintMessage, lintObjections, lintSequences, toMessage, toSequences } from "./helpers";
@@ -7,8 +7,15 @@ import type { Library, LintIssue, Message, Sequence } from "./types";
 export * from "./types";
 export * from "./helpers";
 
-/** messages/ at the repository root. */
-export const MESSAGES_DIR = path.resolve(import.meta.dir, "../../../messages");
+const BUNDLED_MESSAGES = path.resolve(import.meta.dir, "../../../messages");
+
+/** messages/ in the repository, or a copy under COLD_HOME so edits made on a server outlive a redeploy. */
+export const MESSAGES_DIR = process.env.COLD_HOME ? path.join(path.resolve(process.env.COLD_HOME), "messages") : BUNDLED_MESSAGES;
+
+/** Under COLD_HOME, start from a copy of the bundled library the first time. */
+export function seedMessages(): void {
+  if (MESSAGES_DIR !== BUNDLED_MESSAGES && !existsSync(MESSAGES_DIR)) cpSync(BUNDLED_MESSAGES, MESSAGES_DIR, { recursive: true });
+}
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

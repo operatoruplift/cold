@@ -11,13 +11,23 @@ export class ApiError extends Error {
   }
 }
 
-/** Call the local API. Every request carries the x-cold header the server requires. */
+/** Fired when the server says the session is gone, so the app can show the sign-in screen. */
+export const SIGNED_OUT = "cold:signed-out";
+
+/** Call the API. Every request carries the x-cold header the server requires, and the session cookie. */
 export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const response = await fetch(path, {
-    method: options.method ?? "GET",
-    headers: { "x-cold": "1", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) },
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: options.method ?? "GET",
+      credentials: "same-origin",
+      headers: { "x-cold": "1", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, navigator.onLine ? "Could not reach the COLD server." : "You're offline. This needs a connection.");
+  }
+  if (response.status === 401 && !path.startsWith("/api/session")) window.dispatchEvent(new Event(SIGNED_OUT));
   const text = await response.text();
   let data: unknown;
   try {
@@ -57,4 +67,12 @@ export function useApi<T>(path: string | null): Loaded<T> {
   }, [path, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
   return { ...state, reload };
+}
+
+/** GET a path as text (a CSV export), with the same header and session as api(). */
+export async function apiText(path: string): Promise<string> {
+  const response = await fetch(path, { headers: { "x-cold": "1" }, credentials: "same-origin" });
+  if (response.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
+  if (!response.ok) throw new ApiError(response.status, `${response.status} ${response.statusText}`);
+  return response.text();
 }

@@ -1,4 +1,4 @@
-import { Ban, CalendarClock, Inbox, Megaphone, MessageSquareReply, Plus, Send, MailX } from "lucide-react";
+import { Ban, CalendarClock, Inbox, Megaphone, MessageSquareReply, PenLine, Phone, Plus, Send, MailX, Telescope, Workflow, type LucideIcon } from "lucide-react";
 import type { Campaign, PlanResponse, TouchRow } from "../../domains/web/types";
 import { Link, navigate } from "../app/router";
 import { useStatus } from "../app/status";
@@ -60,6 +60,18 @@ function CampaignDueRow({ campaign }: { campaign: Campaign }) {
   );
 }
 
+const TILES: Array<{ title: string; text: string; to: string; icon: LucideIcon }> = [
+  { title: "Discover", text: "Find the right prospects with AI", to: "/prospects", icon: Telescope },
+  { title: "Write", text: "Sequences and messages, both voices", to: "/library", icon: PenLine },
+  { title: "Call", text: "Scripts and AI prep before you dial", to: "/calls", icon: Phone },
+  { title: "Connect", text: "Replies read and answered", to: "/replies", icon: Inbox },
+  { title: "Sequences", text: "Campaigns across channels", to: "/campaigns", icon: Workflow },
+];
+
+function greeting(hour = new Date().getHours()): string {
+  return hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
+}
+
 export function TodayPage() {
   const status = useStatus();
   const campaigns = useApi<Campaign[]>("/api/campaigns");
@@ -71,14 +83,28 @@ export function TodayPage() {
   return (
     <>
       <PageHeader
-        title="Today"
-        sub={new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+        title={greeting()}
+        sub={`${new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}. Let's turn cold outreach into warm conversations.`}
         actions={
           <Button variant="primary" icon={Plus} onClick={() => navigate("/campaigns?new=1")}>
             New campaign
           </Button>
         }
       />
+      <div className="tiles">
+        {TILES.map((t) => {
+          const Icon = t.icon;
+          return (
+            <Link key={t.title} to={t.to} className="tile">
+              <span className="tile-icon">
+                <Icon size={18} />
+              </span>
+              <b>{t.title}</b>
+              <small>{t.text}</small>
+            </Link>
+          );
+        })}
+      </div>
 
       {status.data?.isExample && (
         <Notice

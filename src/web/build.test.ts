@@ -1,25 +1,24 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
+import { buildAssets } from "../domains/web/server/assets";
 
-// The app is bundled by Bun from index.html when `bun run ui` starts. Build it
-// here too, so a page that does not bundle fails CI instead of the browser.
-test("the web app bundles", async () => {
-  const outdir = mkdtempSync(path.join(tmpdir(), "cold-web-build-"));
-  try {
-    const result = await Bun.build({ entrypoints: [path.join(import.meta.dir, "index.html")], outdir, minify: true });
-    expect(result.logs.filter((l) => l.level === "error").map((l) => l.message)).toEqual([]);
-    expect(result.success).toBe(true);
-    const files = readdirSync(outdir);
-    expect(files.some((f) => f.endsWith(".js"))).toBe(true);
-    expect(files.some((f) => f.endsWith(".css"))).toBe(true);
-    const html = readFileSync(path.join(outdir, "index.html"), "utf8");
-    expect(html).toContain('<div id="root">');
-    // The browser bundle must not pull in server code (node:fs and friends).
-    const js = files.filter((f) => f.endsWith(".js")).map((f) => readFileSync(path.join(outdir, f), "utf8")).join("\n");
-    expect(js).not.toMatch(/node:fs|nodemailer|imapflow/);
-  } finally {
-    rmSync(outdir, { recursive: true, force: true });
-  }
+// The server bundles the site and the app in memory when it starts. Build
+// them here too, so a page that does not bundle fails CI instead of a browser.
+test("the site and the app bundle, with every file the service worker needs", async () => {
+  const assets = await buildAssets({ appRoot: path.resolve(import.meta.dir, "../.."), publicUrl: new URL("https://cold.example.com") });
+  expect(assets.pages.app).toContain('<div id="root">');
+  expect(assets.pages.app).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+  expect(assets.pages.site).toContain("Break<br");
+  expect(assets.pages.site).toContain('content="https://cold.example.com/og.png"');
+
+  const js = await Promise.all([...assets.files].filter(([url]) => url.startsWith("/assets/") && url.endsWith(".js")).map(([, f]) => new Response(f.body()).text()));
+  expect(js.length).toBeGreaterThanOrEqual(2);
+  // The browser bundles must not pull in server code (node:fs, the mail and AI clients, the database).
+  expect(js.join("\n")).not.toMatch(/node:fs|nodemailer|imapflow|bun:sqlite|@anthropic-ai\/sdk/);
+
+  // Every file the service worker precaches is one the server hands out.
+  const worker = await new Response(assets.files.get("/sw.js")!.body()).text();
+  const shell = JSON.parse(/const SHELL = (\[.*?\]);/.exec(worker)![1]!) as string[];
+  for (const url of shell) expect(url === "/app/" || assets.files.has(url)).toBe(true);
+  for (const url of ["/manifest.webmanifest", "/favicon.ico", "/icons/icon-512.png", "/icons/maskable-512.png", "/fonts/inter-latin.woff2", "/brand/cold-logo.svg"]) expect(assets.files.has(url)).toBe(true);
 });

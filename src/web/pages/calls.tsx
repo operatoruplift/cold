@@ -1,10 +1,11 @@
-import { ListChecks, Phone, RefreshCw, Search } from "lucide-react";
+import { ListChecks, Phone, RefreshCw, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { CallPrep } from "../../domains/ai/tasks";
 import type { CallSheet } from "../../domains/call";
 import type { ActionResponse, LibraryResponse } from "../../domains/web/types";
 import { setQuery, useLocation } from "../app/router";
 import { useStatus } from "../app/status";
-import { api, useApi } from "../lib/api";
+import { api, ApiError, useApi } from "../lib/api";
 import { voiceLabel } from "../lib/format";
 import { Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Pill, Tabs } from "../ui/kit";
 import { ProspectPicker } from "../ui/prospectPicker";
@@ -13,7 +14,7 @@ export function CallsPage() {
   const library = useApi<LibraryResponse>("/api/library");
   const { query } = useLocation();
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"script" | "objections">("script");
+  const [tab, setTab] = useState<"script" | "objections" | "ai">("script");
   const [source, setSource] = useState("");
   const [prospect, setProspect] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -93,10 +94,13 @@ export function CallsPage() {
                   tabs={[
                     { id: "script", label: "Script", icon: Phone },
                     { id: "objections", label: "Objections", icon: ListChecks, count: sheet.data.objections.length },
+                    { id: "ai", label: "AI prep", icon: Sparkles },
                   ]}
                 />
                 <div className="card-body stack">
-                  {tab === "script"
+                  {tab === "ai" ? (
+                    <CallPrepPanel key={`${selected}|${source}|${prospect}`} script={selected} source={source} prospect={prospect} />
+                  ) : tab === "script"
                     ? sheet.data.sections.map((s) => (
                         <div key={s.heading}>
                           <div className="section-label">{s.heading}</div>
@@ -111,7 +115,7 @@ export function CallsPage() {
                           </div>
                         </details>
                       ))}
-                  <p className="hint">Words in [brackets] are yours to fill in live. Never read them out.</p>
+                  {tab !== "ai" && <p className="hint">Words in [brackets] are yours to fill in live. Never read them out.</p>}
                 </div>
               </div>
             )}
@@ -119,6 +123,84 @@ export function CallsPage() {
         )}
       </div>
       {syncing && <SyncModal onClose={() => setSyncing(false)} />}
+    </div>
+  );
+}
+
+/** Claude's notes for this call: an opener, questions, objection answers and a voicemail, from what's known about the prospect. */
+function CallPrepPanel({ script, source, prospect }: { script: string; source: string; prospect: string }) {
+  const [prep, setPrep] = useState<CallPrep>();
+  const [researched, setResearched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError>();
+
+  async function run() {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const r = await api<{ output: CallPrep; researched: boolean }>("/api/ai/call", { method: "POST", body: { script, source: source || undefined, prospect: prospect || undefined } });
+      setPrep(r.output);
+      setResearched(r.researched);
+    } catch (err) {
+      setError(err as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack">
+      <div className="row wrap">
+        <Button variant="ai" icon={Sparkles} loading={busy} onClick={run}>
+          {prep ? "Prepare again" : "Prepare me for this call"}
+        </Button>
+        <span className="hint">
+          {prospect ? "Uses this script, your offer and what's known about the prospect" : "Pick a prospect above to tailor it to them"}. You make the call yourself: COLD never dials or speaks with an AI voice.
+        </span>
+      </div>
+      <ErrorNotice error={error} title="No prep" />
+      {prep && (
+        <>
+          {prospect && !researched && <Notice tone="blue">This prospect hasn't been researched yet, so the prep only uses what's on the list. Research them on the Prospects page for a sharper opener.</Notice>}
+          <div>
+            <div className="section-label">Open with</div>
+            <div className="message-box big">{prep.opener}</div>
+          </div>
+          <div>
+            <div className="section-label">Why you're calling</div>
+            <div className="message-box">{prep.reason}</div>
+          </div>
+          <div>
+            <div className="section-label">Ask</div>
+            <ol className="message-box" style={{ paddingLeft: 34, whiteSpace: "normal" }}>
+              {prep.questions.map((q) => (
+                <li key={q}>{q}</li>
+              ))}
+            </ol>
+          </div>
+          <div>
+            <div className="section-label">If they say</div>
+            <div className="stack" style={{ gap: 8 }}>
+              {prep.objections.map((o) => (
+                <details key={o.objection} className="card" style={{ padding: "10px 14px" }} open>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>"{o.objection}"</summary>
+                  <div style={{ marginTop: 8 }} className="text-2">
+                    {o.response}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="section-label">Voicemail</div>
+            <div className="message-box">{prep.voicemail}</div>
+          </div>
+          <div>
+            <div className="section-label">Ask for</div>
+            <div className="message-box">{prep.next_step}</div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

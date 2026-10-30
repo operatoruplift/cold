@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { configPaths, loadConfigFile, type Account, type ColdConfig } from "../../config";
+import { APP_ROOT, configPaths, loadConfigFile, type Account, type ColdConfig } from "../../config";
+import { AiStore, claudeCall, type MessagesCall } from "../../ai";
+import type { Database } from "../../db";
 import type { MailTransport } from "../../email";
 import { loadLibrary } from "../../messages";
 import { loadProspects, type Prospect } from "../../prospects";
@@ -12,7 +14,10 @@ export interface WebContextOptions {
   /** Where cold.yaml, .env.local, .cold/ and prospect CSVs live. */
   root: string;
   messagesDir: string;
-  /** Tests swap out the mailbox, the clock and the delays. */
+  /** The app's SQLite file: AI runs and drafts live there. */
+  db?: Database;
+  /** Tests swap out Claude, the mailbox, the clock and the delays. */
+  aiCall?: () => MessagesCall;
   transport?: (account: Account) => MailTransport;
   now?: () => Date;
   random?: () => number;
@@ -29,11 +34,19 @@ const STORE_TTL_MS = 5 * 60 * 1000;
 export class WebContext {
   readonly campaigns: CampaignStore;
   readonly jobs = new JobRegistry();
+  /** AI runs and drafts; only when the app has its database. */
+  readonly ai?: AiStore;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
 
   constructor(readonly options: WebContextOptions) {
     this.campaigns = new CampaignStore(path.join(options.root, ".cold", "campaigns.json"));
+    if (options.db) this.ai = new AiStore(options.db, () => this.now());
+  }
+
+  /** Claude, with the API key from the environment (or the test's fake). */
+  claude(): MessagesCall {
+    return this.options.aiCall?.() ?? claudeCall();
   }
 
   get root(): string {
@@ -78,11 +91,14 @@ export class WebContext {
     return store;
   }
 
-  /** A CSV source relative to the repository root, made absolute; other sources as given. */
+  /** A CSV source made absolute: relative to your files, or to the repository for its examples. */
   resolveSource(source: string): string {
     if (!source.startsWith("csv:")) return source;
     const file = source.slice(4);
-    return `csv:${path.isAbsolute(file) ? file : path.join(this.root, file)}`;
+    if (path.isAbsolute(file)) return source;
+    const own = path.join(this.root, file);
+    const bundled = path.join(APP_ROOT, file);
+    return `csv:${!existsSync(own) && existsSync(bundled) ? bundled : own}`;
   }
 
   async prospects(source: string, where?: string, refresh = false): Promise<Prospect[]> {

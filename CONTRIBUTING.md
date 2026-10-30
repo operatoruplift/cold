@@ -24,17 +24,33 @@ bun run check          # typecheck + tests + message lint
 House rules for copy: plain words, short sentences, one question per message,
 no emojis, nothing invented. `proof` lines must be true.
 
-## The app
+## The site and the app
 
 ```bash
-bun run ui --dev       # http://localhost:4100, rebuilt on every change
+bun run dev            # http://localhost:4100 (site) and /app/, restarted on every change
 ```
 
-Pages live in `src/web/` (React, bundled by Bun from `src/web/index.html`);
-their API is `src/domains/web/`. The browser imports server types with
-`import type` only, never runtime code. Colours, radii and sizes are tokens in
-`src/web/styles.css`; use them, and the components in `src/web/ui/`, instead
-of new values.
+- The public site is `src/site/`: plain HTML, CSS and one TypeScript file for
+  the motion. No framework, and it must read without JavaScript.
+- The app is `src/web/` (React). Pages call the API with `api()` from
+  `src/web/lib/api.ts`; the browser imports server types with `import type`
+  only, never runtime code (a test checks the bundle).
+- The server is `src/domains/web/`: `server/` (the build, the request handler,
+  the login gate), `api/` (campaigns and settings), `ai/` (the AI routes).
+- Both are bundled in memory when the server starts. Files in `public/` are
+  served as they are; reference them by absolute path (`/brand/cold-logo.svg`)
+  from TypeScript and CSS, and let the server add the head tags.
+- Colours, radii and sizes are tokens (`src/web/styles.css`,
+  `src/site/site.css`) from the COLD palette in docs/brand.md; use them, and
+  the components in `src/web/ui/`, instead of new values.
+
+## AI
+
+Prompts and schemas are in `src/domains/ai/tasks.ts`; the requests are built
+in `src/domains/ai/claude.ts`. Tests use a fake Claude (`MessagesCall`), so
+they never spend tokens. Keep the rules that make the output safe to send:
+facts only from the prospect, the research or a page Claude opened; drafts are
+never sent without approval.
 
 ## Code
 

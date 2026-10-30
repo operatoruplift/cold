@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+.cold
+cold.yaml
+.env
+.env.*
+prospects*.csv
+!examples/prospects.csv
+docs/screenshots
+*.log
+.DS_Store

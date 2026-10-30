@@ -1,7 +1,11 @@
-import { CheckCircle2, Database, FileText, KeyRound, Mailbox, PlugZap, Save, ShieldCheck, Wand2, XCircle } from "lucide-react";
+import { CheckCircle2, Database, FileText, KeyRound, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, UserRound, Wand2, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ActionResponse, SettingsResponse } from "../../domains/web/types";
+import type { ActionResponse, AiStatusResponse, SessionsResponse, SettingsResponse } from "../../domains/web/types";
+import { usePwa, install } from "../app/pwa";
+import { useSession } from "../app/session";
 import { useStatus } from "../app/status";
+import { tokens } from "../lib/ai";
+import { ago } from "../lib/format";
 import { api, ApiError, useApi } from "../lib/api";
 import { Button, Card, ErrorNotice, Loading, Notice, PageHeader, Pill } from "../ui/kit";
 import { useToast } from "../ui/toast";
@@ -43,7 +47,11 @@ export function SettingsPage() {
   const store = s?.store;
   return (
     <>
-      <PageHeader title="Settings" sub="Who sends, what you offer, and the connections. Everything stays on this computer." />
+      <PageHeader title="Settings" sub="Your login, who sends, what you offer, and the connections." />
+      <div className="grid two" style={{ marginBottom: 16 }}>
+        <AccountCard />
+        <AiCard />
+      </div>
       {s?.isExample && (
         <Notice
           tone="amber"
@@ -253,6 +261,136 @@ function ConfigEditor({ settings, onSaved }: { settings: SettingsResponse; onSav
         <div className="row text-3" style={{ gap: 6 }}>
           <ShieldCheck size={14} /> Saving checks every line first; a broken file is never written.
         </div>
+      </div>
+    </Card>
+  );
+}
+
+function AccountCard() {
+  const { session, signOut } = useSession();
+  const sessions = useApi<SessionsResponse>("/api/session/list");
+  const pwa = usePwa();
+  const toast = useToast();
+  const [changing, setChanging] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError>();
+  const owner = session?.owner;
+
+  async function changePassword() {
+    setBusy("pw");
+    setError(undefined);
+    try {
+      const r = await api<ActionResponse>("/api/session/password", { method: "POST", body: { current, password: next } });
+      toast.success(r.message);
+      setChanging(false);
+      setCurrent("");
+      setNext("");
+      sessions.reload();
+    } catch (err) {
+      setError(err as ApiError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function signOutOthers() {
+    setBusy("others");
+    try {
+      const r = await api<ActionResponse>("/api/session/revoke-others", { method: "POST", body: {} });
+      toast.success(r.message);
+      sessions.reload();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const list = sessions.data?.sessions ?? [];
+  return (
+    <Card title="Your login" icon={UserRound}>
+      <div className="stack">
+        <Check ok>Signed in as {owner?.email}</Check>
+        {owner?.managedByEnv && <p className="hint">Set by COLD_OWNER_EMAIL and COLD_OWNER_PASSWORD_HASH on the server: change it there.</p>}
+        <div className="row wrap">
+          {!owner?.managedByEnv && (
+            <Button size="sm" icon={KeyRound} onClick={() => setChanging((c) => !c)}>
+              Change password
+            </Button>
+          )}
+          <Button size="sm" icon={LogOut} onClick={() => void signOut()}>
+            Sign out
+          </Button>
+          {pwa.installable && (
+            <Button size="sm" icon={MonitorSmartphone} onClick={() => void install()}>
+              Install COLD
+            </Button>
+          )}
+        </div>
+        {changing && (
+          <div className="stack" style={{ gap: 8 }}>
+            <input className="input" type="password" autoComplete="current-password" placeholder="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+            <input className="input" type="password" autoComplete="new-password" placeholder="New password (12+ characters)" value={next} onChange={(e) => setNext(e.target.value)} />
+            <ErrorNotice error={error} title="Not changed" />
+            <div>
+              <Button size="sm" variant="primary" loading={busy === "pw"} disabled={!current || next.length < 12} onClick={changePassword}>
+                Save new password
+              </Button>
+            </div>
+          </div>
+        )}
+        <div>
+          <div className="section-label">Signed in on</div>
+          <div className="stack" style={{ gap: 6 }}>
+            {list.map((x) => (
+              <div key={x.id} className="row between" style={{ fontSize: 12.5 }}>
+                <span className="truncate" title={x.userAgent}>
+                  <MonitorSmartphone size={13} className="text-3" /> {device(x.userAgent)}
+                  {x.current ? <span className="text-green"> (this one)</span> : null}
+                </span>
+                <span className="text-3">{ago(x.lastSeenAt)}</span>
+              </div>
+            ))}
+          </div>
+          {list.length > 1 && (
+            <Button size="sm" variant="ghost" loading={busy === "others"} onClick={signOutOthers} style={{ marginTop: 6 }}>
+              Sign out everywhere else
+            </Button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** "Chrome on macOS" from a user agent, roughly. */
+function device(ua = ""): string {
+  const browser = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : /curl/.test(ua) ? "curl" : "A browser";
+  const os = /iPhone|iPad/.test(ua) ? "iPhone/iPad" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "macOS" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} on ${os}` : browser;
+}
+
+function AiCard() {
+  const ai = useApi<AiStatusResponse>("/api/ai/status");
+  const usage = ai.data?.usage;
+  return (
+    <Card title="AI" icon={Sparkles}>
+      <div className="stack">
+        <Check ok={!!ai.data?.configured}>{ai.data?.configured ? `Claude is connected (${ai.data.model})` : "Not connected: add ANTHROPIC_API_KEY below"}</Check>
+        <p className="text-2">
+          Claude finds and researches prospects (with web search), personalizes messages, prepares calls and reads replies. It never sends anything: drafts wait for your approval, and DMs and calls stay yours.
+        </p>
+        {usage && (
+          <div className="kv">
+            <dt>Last 30 days</dt>
+            <dd>
+              {usage.runs} requests, {tokens(usage.inputTokens)} tokens in, {tokens(usage.outputTokens)} out, {usage.searches} web searches
+            </dd>
+          </div>
+        )}
+        <p className="hint">Billed to your Anthropic account. Set COLD_AI_MODEL in the environment to use another Claude model.</p>
       </div>
     </Card>
   );

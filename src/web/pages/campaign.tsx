@@ -1,11 +1,13 @@
-import { Ban, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Download, ExternalLink, Hourglass, Mail, MessageSquareReply, Pencil, RefreshCw, Send, SkipForward, Square, Trash2, UserX, XCircle } from "lucide-react";
+import { Ban, CalendarClock, Sparkles, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Download, ExternalLink, Hourglass, Mail, MessageSquareReply, Pencil, RefreshCw, Send, SkipForward, Square, Trash2, UserX, XCircle } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import type { AiDraftRecord } from "../../domains/ai/store";
 import type { Campaign, JobEvent, JobResponse, PlanResponse, PlanRow } from "../../domains/web/types";
 import { navigate } from "../app/router";
 import { useStatus } from "../app/status";
 import { api, ApiError, useApi } from "../lib/api";
 import { channelLabel, day, plural, sequenceName, sourceLabel, voiceLabel } from "../lib/format";
 import { Button, Card, Empty, ErrorNotice, initials, Loading, Modal, Notice, PageHeader, Pill, Stat, Tabs } from "../ui/kit";
+import { AiDraft } from "../ui/aiDraft";
 import { useToast } from "../ui/toast";
 import { CampaignForm } from "./campaignForm";
 
@@ -15,6 +17,7 @@ export function CampaignPage({ id }: { id: string }) {
   const campaigns = useApi<Campaign[]>("/api/campaigns");
   const [refresh, setRefresh] = useState(0);
   const plan = useApi<PlanResponse>(`/api/campaigns/${id}/plan${refresh ? `?refresh=1&n=${refresh}` : ""}`);
+  const drafts = useApi<AiDraftRecord[]>(`/api/ai/drafts?campaignId=${encodeURIComponent(id)}`);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const toast = useToast();
@@ -86,8 +89,12 @@ export function CampaignPage({ id }: { id: string }) {
             <Stat label="Skipped" icon={UserX} tone="amber" value={p.skipped.length} note="Replied, opted out, finished..." />
             <Stat label="Held back" icon={Hourglass} tone="red" value={p.held.length} note="A message with a blank" />
           </div>
-          {isEmail ? <EmailSender plan={p} campaign={campaign} onDone={() => plan.reload()} /> : <DmQueue plan={p} campaign={campaign} onChange={() => plan.reload()} />}
-          <PlanTabs plan={p} />
+          {isEmail ? (
+            <EmailSender plan={p} campaign={campaign} onDone={() => plan.reload()} />
+          ) : (
+            <DmQueue plan={p} campaign={campaign} drafts={drafts.data ?? []} onChange={() => (plan.reload(), drafts.reload())} />
+          )}
+          <PlanTabs plan={p} campaign={campaign} drafts={drafts.data ?? []} onChanged={() => (plan.reload(), drafts.reload())} />
         </>
       )}
 
@@ -348,7 +355,7 @@ function SendProgress({ jobId, total, onFinished, onClose, onLost }: { jobId: st
 
 /* DMs: one at a time, you send it, then say what happened. */
 
-function DmQueue({ plan, campaign, onChange }: { plan: PlanResponse; campaign: Campaign; onChange: () => void }) {
+function DmQueue({ plan, campaign, drafts, onChange }: { plan: PlanResponse; campaign: Campaign; drafts: AiDraftRecord[]; onChange: () => void }) {
   const status = useStatus();
   const toast = useToast();
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
@@ -451,7 +458,10 @@ function DmQueue({ plan, campaign, onChange }: { plan: PlanResponse; campaign: C
             <div className="dm-card-body">
               {current.when && <div className="hint">{current.when}</div>}
               <div className="message-box big">{current.text}</div>
-              <div className="hint">{current.text?.length} characters</div>
+              <div className="hint">
+                {current.text?.length} characters{current.custom ? ", your approved AI draft" : ""}
+              </div>
+              <AiDraft campaignId={campaign.id} row={current} channel="dm" existing={drafts.find((d) => d.prospectKey === current.key && d.step === (current.step ?? 1))} onChanged={onChange} />
               <div className="dm-actions">
                 <Button icon={Copy} onClick={copy}>
                   Copy message <kbd>C</kbd>
@@ -507,7 +517,7 @@ function DmQueue({ plan, campaign, onChange }: { plan: PlanResponse; campaign: C
 
 /* Everyone in the plan, by state. */
 
-function PlanTabs({ plan }: { plan: PlanResponse }) {
+function PlanTabs({ plan, campaign, drafts, onChanged }: { plan: PlanResponse; campaign: Campaign; drafts: AiDraftRecord[]; onChanged: () => void }) {
   const [tab, setTab] = useState<Tab>(plan.due.length ? "due" : plan.waiting.length ? "waiting" : "skipped");
   const [open, setOpen] = useState<string | null>(null);
   const rows: Record<Tab, PlanRow[]> = { due: plan.due, waiting: plan.waiting, skipped: plan.skipped, held: plan.held };
@@ -538,7 +548,9 @@ function PlanTabs({ plan }: { plan: PlanResponse }) {
                     <tr className={expandable ? "clickable" : undefined} onClick={() => expandable && setOpen(isOpen ? null : r.key)}>
                       <td style={{ width: 28 }}>{expandable ? isOpen ? <ChevronDown size={15} className="text-3" /> : <ChevronRight size={15} className="text-3" /> : null}</td>
                       <td>
-                        <div className="strong">{r.label}</div>
+                        <div className="strong">
+                          {r.label} {r.custom && <span className="ai-badge">AI draft approved</span>}
+                        </div>
                         {r.address && <div className="muted truncate" style={{ maxWidth: 360 }}>{r.address}</div>}
                       </td>
                       <td>
@@ -560,6 +572,7 @@ function PlanTabs({ plan }: { plan: PlanResponse }) {
                         <td colSpan={3} className="expand">
                           {r.subject && <div className="subject">{r.subject}</div>}
                           <div className="message-box">{r.text}</div>
+                          <AiDraft campaignId={campaign.id} row={r} channel={plan.channel === "email" ? "email" : "dm"} existing={drafts.find((d) => d.prospectKey === r.key && d.step === (r.step ?? 1))} onChanged={onChanged} />
                         </td>
                       </tr>
                     )}
@@ -571,7 +584,12 @@ function PlanTabs({ plan }: { plan: PlanResponse }) {
         </div>
       )}
       {tab === "held" && plan.held.length > 0 && (
-        <div className="card-body hint">Each of these messages uses a variable this prospect has no value for (often the trigger line). Add it to the list (a CSV column, or the coldTrigger field in Twenty), then press Refresh.</div>
+        <div className="card-body row between wrap">
+          <span className="hint">Each of these messages uses a variable this prospect has no value for (often the trigger line). Research them to find a true one, or add it to the list (a CSV column, or the coldTrigger field in Twenty), then press Refresh.</span>
+          <Button size="sm" variant="ai" icon={Sparkles} onClick={() => navigate(`/prospects?tab=research&source=${encodeURIComponent(campaign.source)}`)}>
+            Research them
+          </Button>
+        </div>
       )}
     </Card>
   );
