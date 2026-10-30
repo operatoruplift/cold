@@ -24,6 +24,18 @@ bun run check          # typecheck + tests + message lint
 House rules for copy: plain words, short sentences, one question per message,
 no emojis, nothing invented. `proof` lines must be true.
 
+## The app
+
+```bash
+bun run ui --dev       # http://localhost:4100, rebuilt on every change
+```
+
+Pages live in `src/web/` (React, bundled by Bun from `src/web/index.html`);
+their API is `src/domains/web/`. The browser imports server types with
+`import type` only, never runtime code. Colours, radii and sizes are tokens in
+`src/web/styles.css`; use them, and the components in `src/web/ui/`, instead
+of new values.
+
 ## Code
 
 The layout follows [dialer](https://github.com/matthewdonsemail-lab/dialer), the

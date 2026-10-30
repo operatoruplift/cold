@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import type { Account, Offer } from "../../config";
 import { bold, countReasons, dim, green, indent, red, yellow, type Io } from "../../cli/io";
-import type { Sequence } from "../../messages";
+import type { Message, Sequence } from "../../messages";
 import { buildVariables, renderForProspect, startOfDay } from "../../outreach";
 import type { Prospect } from "../../prospects";
 import { renderTemplate } from "../../render";
-import { planSequence, type Touch, type TouchStore } from "../../touches";
+import { planSequence, type Plan, type Touch, type TouchStore } from "../../touches";
 import { addressOf, buildEmail, classifySmtpFailure, describeWindow, domainOf, isInWindow } from "../helpers";
 import type { EmailDraft } from "../types";
 import type { Verifier } from "../verify";
@@ -49,6 +49,60 @@ export interface EmailRunResult {
   aborted?: string;
 }
 
+/** A due email whose message has an empty variable: not sent until it is filled. */
+export interface HeldEmail {
+  prospect: Prospect;
+  step: Message;
+  missing: string[];
+}
+
+/** A due email, written and ready to go. */
+export interface ReadyEmail {
+  prospect: Prospect;
+  step: Message;
+  address: string;
+  draft: EmailDraft;
+  previous?: Touch;
+}
+
+/** Everything about one send before anything is sent. */
+export interface PreparedEmailRun {
+  sequence: Sequence;
+  account: Account;
+  plan: Plan;
+  held: HeldEmail[];
+  ready: ReadyEmail[];
+  /** What goes out now: the ready emails within the daily cap and the limit. */
+  batch: ReadyEmail[];
+  dailyCap: number;
+  sentToday: number;
+  /** Whether the sending window is open now; undefined when the account has none. */
+  windowOpen?: boolean;
+  windowText?: string;
+}
+
+/** What happens during a send, as it happens: for the web UI's progress. */
+export type EmailEvent =
+  | { type: "sent"; label: string; address: string; step: number }
+  | { type: "failed"; label: string; address: string; step: number; reason: string; bounced: boolean }
+  | { type: "skipped"; label: string; address: string; reason: string }
+  | { type: "pause"; seconds: number }
+  | { type: "stopped"; reason: string };
+
+export interface SendOptions {
+  store: TouchStore;
+  ignoreWindow: boolean;
+  transport?: MailTransport;
+  verifier?: Verifier;
+  now?: () => Date;
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  io?: Io;
+  onEvent?: (event: EmailEvent) => void;
+  /** Checked before each email after the first: true stops the batch. */
+  shouldStop?: () => boolean;
+}
+
 /** A transport from the account's SMTP URL env var. */
 export function smtpTransport(account: Account): MailTransport {
   const name = account.email?.smtpUrlEnv;
@@ -57,27 +111,15 @@ export function smtpTransport(account: Account): MailTransport {
   return nodemailer.createTransport(url) as unknown as MailTransport;
 }
 
-interface Ready {
-  prospect: Prospect;
-  step: Sequence["steps"][number];
-  address: string;
-  draft: EmailDraft;
-  previous?: Touch;
-}
-
 /**
- * Send the emails of one sequence that are due now, from one account.
- * Every guard runs before anything is sent: the voice must match, the footer
- * must carry a postal address and an opt-out, prospects who replied, opted
- * out, bounced or are marked Do Not Contact are skipped, a message with an
- * empty variable is held back, the daily cap and the sending window hold,
- * and you confirm the batch. Each email is logged as it goes out.
+ * Work out a send without sending anything: who is due, every email written
+ * out, who is held back, and how much of the daily cap is left. The guards
+ * that make a send impossible (wrong voice, no postal address, a footer with
+ * no opt-out) throw here, before anyone sees a "Send" button.
  */
-export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
-  const { sequence, account, offer, store, options, io } = input;
+export async function prepareEmailRun(input: { sequence: Sequence; account: Account; offer?: Offer; prospects: Prospect[]; store: TouchStore; limit?: number; now?: () => Date }): Promise<PreparedEmailRun> {
+  const { sequence, account, offer, store } = input;
   const now = input.now ?? (() => new Date());
-  const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const random = input.random ?? Math.random;
   const email = account.email;
 
   if (sequence.channel !== "email") throw new Error(`${sequence.id} is not an email sequence`);
@@ -95,13 +137,13 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
   const [history, suppressions] = await Promise.all([store.forProspects(identities), store.suppressions()]);
   const plan = planSequence({ sequence, channel: "EMAIL", prospects: input.prospects, history, suppressions, now: now(), reachable: (p) => p.email, timeZone: email.window?.timezone });
 
-  const ready: Ready[] = [];
-  const held: string[] = [];
+  const ready: ReadyEmail[] = [];
+  const held: HeldEmail[] = [];
   for (const item of plan.due) {
     const variables = buildVariables(account, offer, item.prospect);
     const rendered = renderForProspect(item.step, variables, item.prospect.key);
     if (rendered.missing.length) {
-      held.push(`missing ${rendered.missing.map((m) => `{{${m}}}`).join(", ")}`);
+      held.push({ prospect: item.prospect, step: item.step, missing: rendered.missing });
       continue;
     }
     const unsubscribeUrl = email.unsubscribeUrl ? renderTemplate(email.unsubscribeUrl, { ...variables, email: encodeURIComponent(item.address) }, { mode: "strict", seed: "" }).text : undefined;
@@ -122,51 +164,50 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
 
   const sentToday = (await store.since(startOfDay(now(), email.window?.timezone), { account: account.key, channel: "EMAIL", kind: "SENT" })).length;
   const capLeft = Math.max(0, email.dailyCap - sentToday);
-  const batch = ready.slice(0, Math.min(capLeft, options.limit ?? Number.POSITIVE_INFINITY));
+  return {
+    sequence,
+    account,
+    plan,
+    held,
+    ready,
+    batch: ready.slice(0, Math.min(capLeft, input.limit ?? Number.POSITIVE_INFINITY)),
+    dailyCap: email.dailyCap,
+    sentToday,
+    windowOpen: email.window ? isInWindow(now(), email.window) : undefined,
+    windowText: email.window ? describeWindow(email.window) : undefined,
+  };
+}
 
-  io.log(`${bold(sequence.id)} from ${email.from} ${dim(`(account ${account.key}, ${store.kind === "twenty" ? "logging to Twenty" : `logging to ${store.where}`})`)}`);
-  io.log(`  ${input.prospects.length} prospects: ${plan.due.length} due now, ${plan.waiting.length} waiting, ${plan.skipped.length} skipped`);
-  if (plan.skipped.length) io.log(dim(`  skipped: ${countReasons(plan.skipped.map((s) => s.reason))}`));
-  if (held.length) io.log(yellow(`  held back: ${countReasons(held)} (fill these in, then run again)`));
-  if (plan.waiting.length) {
-    const next = [...plan.waiting].sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0]!;
-    io.log(dim(`  next one due on ${next.dueOn} (${next.prospect.label}, step ${next.step.step})`));
-  }
-  io.log(`  daily cap ${email.dailyCap}, ${sentToday} sent today: ${batch.length ? bold(`${batch.length} to send`) : "nothing to send"}`);
-  if (ready.length > batch.length) io.log(dim(`  ${ready.length - batch.length} more wait for the cap or --limit`));
+/**
+ * Send a prepared batch. Every email is logged before the next goes out; the
+ * sending window is checked before each one; a refused mailbox, three
+ * failures in a row, a touch that cannot be logged, or `shouldStop` ends the
+ * batch early. Each step is reported to `io` (the terminal) and `onEvent`
+ * (the web UI).
+ */
+export async function sendEmails(prepared: PreparedEmailRun, options: SendOptions): Promise<EmailRunResult> {
+  const { sequence, account, batch } = prepared;
+  const email = account.email!;
+  const { store } = options;
+  const now = options.now ?? (() => new Date());
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const random = options.random ?? Math.random;
+  const log = (line = "") => options.io?.log(line);
+  const emit = (event: EmailEvent) => options.onEvent?.(event);
+  const result: EmailRunResult = { sent: 0, failed: 0, skipped: 0 };
+  const stop = (reason: string, tone: (s: string) => string = red) => {
+    result.aborted = reason;
+    log(tone(`Stopping: ${reason}.`));
+    emit({ type: "stopped", reason });
+  };
 
-  const result: EmailRunResult = { sent: 0, failed: 0, skipped: plan.skipped.length + held.length };
-  if (batch.length === 0) return result;
-
-  if (options.dryRun) {
-    const shown = options.showAll ? batch : batch.slice(0, 3);
-    for (const r of shown) {
-      io.log("");
-      io.log(`${cyanArrow()} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}: ${r.step.title}`)}`);
-      io.log(indent(`Subject: ${r.draft.subject}\n\n${r.draft.text.trim()}`));
-    }
-    if (shown.length < batch.length) io.log(dim(`\n  ... and ${batch.length - shown.length} more (--show-all to print them)`));
-    io.log(dim("\nDry run: nothing was sent."));
-    return result;
-  }
-
-  if (email.window && !options.ignoreWindow && !isInWindow(now(), email.window)) {
-    result.aborted = `outside the sending window (${describeWindow(email.window)})`;
-    io.log(yellow(`Not sending: ${result.aborted}. Run it again then, or pass --ignore-window.`));
-    return result;
-  }
-
-  if (!options.yes && !(await io.confirm(`Send ${batch.length} email${batch.length === 1 ? "" : "s"} from ${addressOf(email.from)} now?`))) {
-    io.log("Cancelled. Nothing was sent.");
-    return result;
-  }
-
-  const transport = input.transport ?? smtpTransport(account);
+  const transport = options.transport ?? smtpTransport(account);
   try {
     await transport.verify();
   } catch (err) {
     result.aborted = `the mailbox refused the connection: ${(err as Error).message}`;
-    io.log(red(`Not sending: ${result.aborted}`));
+    log(red(`Not sending: ${result.aborted}`));
+    emit({ type: "stopped", reason: result.aborted });
     return result;
   }
 
@@ -177,17 +218,19 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
       await store.record(touch);
       return true;
     } catch (err) {
-      result.aborted = `a touch could not be logged: ${(err as Error).message}`;
-      io.log(red(`Stopping: ${result.aborted}`));
+      stop(`a touch could not be logged: ${(err as Error).message}`);
       return false;
     }
   };
 
   try {
     for (const [index, r] of batch.entries()) {
+      if (index > 0 && options.shouldStop?.()) {
+        stop(`stopped by you; ${batch.length - index} left for next time`, yellow);
+        break;
+      }
       if (index > 0 && email.window && !options.ignoreWindow && !isInWindow(now(), email.window)) {
-        result.aborted = `the sending window closed (${describeWindow(email.window)}); ${batch.length - index} left for next time`;
-        io.log(yellow(`Stopping: ${result.aborted}.`));
+        stop(`the sending window closed (${describeWindow(email.window)}); ${batch.length - index} left for next time`, yellow);
         break;
       }
 
@@ -205,11 +248,12 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
         links: r.prospect.links,
       };
 
-      if (r.step.step === 1 && input.verifier) {
-        const verdict = await input.verifier.check(r.address);
+      if (r.step.step === 1 && options.verifier) {
+        const verdict = await options.verifier.check(r.address);
         if (verdict === "invalid") {
           if (!(await save({ ...base, kind: "UNDELIVERABLE", error: "Reacher: invalid", occurredAt: now().toISOString() }))) break;
-          io.log(`${yellow("skip")} ${r.prospect.label} <${r.address}>: verified undeliverable`);
+          log(`${yellow("skip")} ${r.prospect.label} <${r.address}>: verified undeliverable`);
+          emit({ type: "skipped", label: r.prospect.label, address: r.address, reason: "verified undeliverable" });
           result.skipped++;
           continue;
         }
@@ -227,17 +271,18 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
         result.sent++;
         if (!(await save({ ...base, kind: "SENT", subject: r.draft.subject, body: r.draft.text, messageId: r.draft.messageId, occurredAt: now().toISOString() }))) break;
         failuresInARow = 0;
-        io.log(`${green("sent")} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}`)}`);
+        log(`${green("sent")} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}`)}`);
+        emit({ type: "sent", label: r.prospect.label, address: r.address, step: r.step.step ?? 0 });
       } else {
         const kind = classifySmtpFailure(failure);
         result.failed++;
         failuresInARow++;
         const detail = `${failure.code ?? ""} ${failure.message}`.trim().slice(0, 1000);
         if (!(await save({ ...base, kind: kind === "recipient" ? "BOUNCED" : "FAILED", error: detail, occurredAt: now().toISOString() }))) break;
-        io.log(`${red(kind === "recipient" ? "rejected" : "failed")} ${r.prospect.label} <${r.address}>: ${failure.message}`);
+        log(`${red(kind === "recipient" ? "rejected" : "failed")} ${r.prospect.label} <${r.address}>: ${failure.message}`);
+        emit({ type: "failed", label: r.prospect.label, address: r.address, step: r.step.step ?? 0, reason: failure.message, bounced: kind === "recipient" });
         if (kind === "mailbox" || failuresInARow >= 3) {
-          result.aborted = kind === "mailbox" ? `the mailbox stopped accepting mail (${failure.code ?? failure.command ?? "error"}: ${failure.message.slice(0, 120)})` : "three failures in a row";
-          io.log(red(`Stopping: ${result.aborted}.`));
+          stop(kind === "mailbox" ? `the mailbox stopped accepting mail (${failure.code ?? failure.command ?? "error"}: ${failure.message.slice(0, 120)})` : "three failures in a row");
           break;
         }
       }
@@ -245,15 +290,69 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
       if (index < batch.length - 1) {
         const min = email.minDelaySeconds * 1000;
         const max = email.maxDelaySeconds * 1000;
-        await sleep(Math.round(min + random() * (max - min)));
+        const pause = Math.round(min + random() * (max - min));
+        emit({ type: "pause", seconds: Math.round(pause / 1000) });
+        await sleep(pause);
       }
     }
   } finally {
     transport.close?.();
   }
 
-  io.log(`\n${result.sent} sent, ${result.failed} failed${result.aborted ? `, stopped: ${result.aborted}` : ""}.`);
+  log(`\n${result.sent} sent, ${result.failed} failed${result.aborted ? `, stopped: ${result.aborted}` : ""}.`);
   return result;
 }
 
-const cyanArrow = () => bold("->");
+/**
+ * Send the emails of one sequence that are due now, from one account: the
+ * terminal flow. Prepare, print the plan, then (unless it is a dry run, the
+ * window is shut, or you say no) send.
+ */
+export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
+  const { store, options, io } = input;
+  const now = input.now ?? (() => new Date());
+  const prepared = await prepareEmailRun({ ...input, limit: options.limit, now });
+  const { plan, held, ready, batch, sequence, account } = prepared;
+  const email = account.email!;
+
+  io.log(`${bold(sequence.id)} from ${email.from} ${dim(`(account ${account.key}, ${store.kind === "twenty" ? "logging to Twenty" : `logging to ${store.where}`})`)}`);
+  io.log(`  ${input.prospects.length} prospects: ${plan.due.length} due now, ${plan.waiting.length} waiting, ${plan.skipped.length} skipped`);
+  if (plan.skipped.length) io.log(dim(`  skipped: ${countReasons(plan.skipped.map((s) => s.reason))}`));
+  if (held.length) io.log(yellow(`  held back: ${countReasons(held.map((h) => `missing ${h.missing.map((m) => `{{${m}}}`).join(", ")}`))} (fill these in, then run again)`));
+  if (plan.waiting.length) {
+    const next = [...plan.waiting].sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0]!;
+    io.log(dim(`  next one due on ${next.dueOn} (${next.prospect.label}, step ${next.step.step})`));
+  }
+  io.log(`  daily cap ${prepared.dailyCap}, ${prepared.sentToday} sent today: ${batch.length ? bold(`${batch.length} to send`) : "nothing to send"}`);
+  if (ready.length > batch.length) io.log(dim(`  ${ready.length - batch.length} more wait for the cap or --limit`));
+
+  const skippedBefore = plan.skipped.length + held.length;
+  const result: EmailRunResult = { sent: 0, failed: 0, skipped: skippedBefore };
+  if (batch.length === 0) return result;
+
+  if (options.dryRun) {
+    const shown = options.showAll ? batch : batch.slice(0, 3);
+    for (const r of shown) {
+      io.log("");
+      io.log(`${bold("->")} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}: ${r.step.title}`)}`);
+      io.log(indent(`Subject: ${r.draft.subject}\n\n${r.draft.text.trim()}`));
+    }
+    if (shown.length < batch.length) io.log(dim(`\n  ... and ${batch.length - shown.length} more (--show-all to print them)`));
+    io.log(dim("\nDry run: nothing was sent."));
+    return result;
+  }
+
+  if (prepared.windowOpen === false && !options.ignoreWindow) {
+    result.aborted = `outside the sending window (${prepared.windowText})`;
+    io.log(yellow(`Not sending: ${result.aborted}. Run it again then, or pass --ignore-window.`));
+    return result;
+  }
+
+  if (!options.yes && !(await io.confirm(`Send ${batch.length} email${batch.length === 1 ? "" : "s"} from ${addressOf(email.from)} now?`))) {
+    io.log("Cancelled. Nothing was sent.");
+    return result;
+  }
+
+  const sent = await sendEmails(prepared, { store, ignoreWindow: options.ignoreWindow, transport: input.transport, verifier: input.verifier, now, sleep: input.sleep, random: input.random, io });
+  return { ...sent, skipped: skippedBefore + sent.skipped };
+}

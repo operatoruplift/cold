@@ -54,20 +54,32 @@ function deliveryReport(attachments: Array<{ contentType?: string; content?: Buf
   return parts.length ? parts.map((a) => a.content?.toString("utf8") ?? "").join("\n") : undefined;
 }
 
-/** imaps://user:pass@host:993 (or imap:// with STARTTLS on 143) from the account's env var. */
-export function imapReader(account: Account): MailboxReader {
+/** ImapFlow options from the account's IMAP URL env var (imaps://user:pass@host:993). */
+function imapOptions(account: Account) {
   const name = account.email?.imapUrlEnv;
   const raw = name ? process.env[name]?.trim() : undefined;
   if (!raw) throw new Error(`${name ?? "imap_url_env"} is not set. Add it to cold.yaml and .env.local, e.g. IMAP_URL_PERSONAL=imaps://you%40yourdomain.com:app-password@imap.gmail.com:993`);
   const url = new URL(raw);
   const secure = url.protocol === "imaps:";
-  const options = {
+  return {
     host: url.hostname,
     port: Number(url.port) || (secure ? 993 : 143),
     secure,
     auth: { user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) },
     logger: false as const,
   };
+}
+
+/** Log in to the account's mailbox and out again: a connection check. */
+export async function testImap(account: Account): Promise<void> {
+  const client = new ImapFlow(imapOptions(account));
+  await client.connect();
+  await client.logout().catch(() => {});
+}
+
+/** imaps://user:pass@host:993 (or imap:// with STARTTLS on 143) from the account's env var. */
+export function imapReader(account: Account): MailboxReader {
+  const options = imapOptions(account);
 
   return {
     async read(since, wanted) {

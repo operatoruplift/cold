@@ -57,17 +57,61 @@ export async function syncCallScripts(input: { client: TwentyClient; library: Li
   return result;
 }
 
+/** A call script filled in for reading: its sections and every objection answer. */
+export interface CallSheet {
+  id: string;
+  title: string;
+  category: string;
+  voice: Message["voice"];
+  when?: string;
+  sections: Array<{ heading: string; text: string }>;
+  objections: Array<{ objection: string; category: string; response: string }>;
+  /** Variables with no value, when filled for a prospect. */
+  missing: string[];
+}
+
+/**
+ * One call script as data: the script split at its "## " headings, then
+ * every objection with its answer in the script's voice. Filled in for a
+ * prospect when one is given; otherwise prospect details stay as {{name}}.
+ */
+export function callSheetData(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect): CallSheet {
+  const variables = buildVariables(account, offer, prospect);
+  const mode = prospect ? "strict" : "partial";
+  const missing = new Set<string>();
+  const fill = (text: string, seed: string) => {
+    const rendered = renderTemplate(text, variables, { mode, seed: `${prospect?.key ?? ""}|${seed}` });
+    rendered.missing.forEach((m) => missing.add(m));
+    return rendered.text;
+  };
+  const sections: CallSheet["sections"] = [];
+  for (const block of fill(script.body, script.id).split(/^## /m)) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const [heading, ...rest] = trimmed.split("\n");
+    sections.push({ heading: heading!.trim(), text: scriptToPlainText(rest.join("\n")) });
+  }
+  return {
+    id: script.id,
+    title: script.title,
+    category: script.category ?? "General",
+    voice: script.voice,
+    when: script.when,
+    sections,
+    objections: library.objections.map((o) => ({ objection: o.objection, category: o.category, response: fill(o[script.voice], o.objection) })),
+    missing: [...missing],
+  };
+}
+
 /**
  * One call script as a sheet to read from: the script, then every objection
  * with its answer, filled in for a prospect when one is given.
  */
 export function callSheet(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect): string {
-  const variables = buildVariables(account, offer, prospect);
-  const mode = prospect ? "strict" : "partial";
-  const fill = (text: string, seed: string) => renderTemplate(text, variables, { mode, seed: `${prospect?.key ?? ""}|${seed}` }).text;
-  const lines = [bold(`${script.title}${prospect ? ` - ${prospect.label}` : ""}`), dim(`${script.category} | ${script.voice} voice | ${script.when ?? ""}`), ""];
-  lines.push(scriptToPlainText(fill(script.body, script.id)));
-  lines.push("", bold("OBJECTIONS"));
-  for (const o of library.objections) lines.push("", `"${o.objection}"`, indent(fill(o[script.voice], o.objection), "  "));
+  const sheet = callSheetData(script, library, account, offer, prospect);
+  const lines = [bold(`${sheet.title}${prospect ? ` - ${prospect.label}` : ""}`), dim(`${sheet.category} | ${sheet.voice} voice | ${sheet.when ?? ""}`), ""];
+  for (const section of sheet.sections) lines.push(section.heading.toUpperCase(), section.text, "");
+  lines.push(bold("OBJECTIONS"));
+  for (const o of sheet.objections) lines.push("", `"${o.objection}"`, indent(o.response, "  "));
   return lines.join("\n");
 }

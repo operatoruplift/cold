@@ -17,5 +17,9 @@ repository (Security, Advisories), not in a public issue.
   need workspace settings.
 - **Reacher is for your machine or private network.** If you expose it, set
   `RCH__HEADER_SECRET` on the server and `REACHER_SECRET` here.
+- **The app is for your own computer.** `bun run ui` listens on 127.0.0.1
+  only, refuses requests whose Host or Origin is not its own, and requires its
+  own header on every API call, so other websites open in your browser cannot
+  drive it. Do not put it behind a public proxy: it has no login.
 - **Prospect lists are personal data.** `prospects*.csv` is gitignored; the
   only CSV in the repository is the fictional example.

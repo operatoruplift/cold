@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 - 2026-10-30
+
+- The app: `bun run ui` opens a local web app in the dialer's style. It has
+  Today, campaigns (email send with live progress and a stop button, the DM
+  queue with Copy, Open profile and outcome buttons), call scripts with sync to
+  the dialer, the message library with preview and editing, replies, stats,
+  and settings with connection tests.
+- Campaigns: a saved sequence, account, offer and prospect list
+  (.cold/campaigns.json). CSV upload from the app.
+- The server listens on 127.0.0.1 only and refuses cross-site requests (Host,
+  Origin and a required header).
+- The email and DM runners now also expose structured plans and progress
+  events, and call sheets come as structured data. The CLI is unchanged.
+
 ## 0.1.0 - 2026-10-30
 
 First release.

@@ -1,9 +1,9 @@
 {
   "name": "cold",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Cold call scripts, cold DMs and cold emails for personal and company accounts: open source, with every touch kept in Twenty CRM.",
+  "description": "Cold call scripts, cold DMs and cold emails for personal and company accounts: open source, with a local web app and every touch kept in Twenty CRM.",
   "author": "Operator Uplift (https://github.com/operatoruplift)",
   "license": "MIT",
   "homepage": "https://github.com/operatoruplift/cold#readme",
@@ -34,6 +34,7 @@
   },
   "scripts": {
     "cold": "bun src/cli.ts",
+    "ui": "bun src/domains/web/server/index.ts",
     "lint:messages": "bun src/cli.ts lint",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
@@ -43,14 +44,19 @@
   },
   "dependencies": {
     "imapflow": "2.5.2",
+    "lucide-react": "1.55.0",
     "mailparser": "3.9.40",
     "nodemailer": "10.1.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/bun": "1.4.3",
     "@types/mailparser": "3.9.0",
     "@types/nodemailer": "8.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "@types/smtp-server": "3.5.13",
     "smtp-server": "3.19.23",
     "typescript": "7.0.2"

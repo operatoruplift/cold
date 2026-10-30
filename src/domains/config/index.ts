@@ -10,26 +10,46 @@ export * from "./helpers";
 /** The repository root (where cold.yaml lives). */
 export const ROOT = path.resolve(import.meta.dir, "../../..");
 
+/** Where cold.yaml is (COLD_CONFIG wins), and the example used when it does not exist yet. */
+export function configPaths(root = ROOT): { file: string; example: string } {
+  const explicit = process.env.COLD_CONFIG;
+  return { file: explicit ? path.resolve(explicit) : path.join(root, "cold.yaml"), example: path.join(root, "cold.example.yaml") };
+}
+
+/** Parse and validate one config file. Throws with every problem listed. */
+export function loadConfigFile(file: string, isExample = false): ColdConfig {
+  if (!existsSync(file)) throw new Error(`${path.relative(process.cwd(), file) || file} not found. Copy cold.example.yaml to cold.yaml.`);
+  let raw: unknown;
+  try {
+    raw = parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    throw new Error(`${path.basename(file)} is not valid YAML: ${(err as Error).message.split("\n")[0]}`);
+  }
+  const { config, errors } = parseConfig(raw, path.basename(file), isExample);
+  if (!config) throw new Error(`${path.basename(file)} has problems:\n  - ${errors.join("\n  - ")}`);
+  return config;
+}
+
 /**
  * Read cold.yaml (or COLD_CONFIG). Without one, the example file is used so
  * lint, list and preview work out of the box; anything that sends refuses an
  * example config.
  */
-export function loadConfig(): ColdConfig {
-  const explicit = process.env.COLD_CONFIG;
-  const file = explicit ? path.resolve(explicit) : path.join(ROOT, "cold.yaml");
-  const useExample = !explicit && !existsSync(file);
-  const source = useExample ? path.join(ROOT, "cold.example.yaml") : file;
-  if (!existsSync(source)) throw new Error(`${path.relative(process.cwd(), source) || source} not found. Copy cold.example.yaml to cold.yaml.`);
-  let raw: unknown;
-  try {
-    raw = parse(readFileSync(source, "utf8"));
-  } catch (err) {
-    throw new Error(`${path.basename(source)} is not valid YAML: ${(err as Error).message.split("\n")[0]}`);
+export function loadConfig(root = ROOT): ColdConfig {
+  const { file, example } = configPaths(root);
+  const useExample = !process.env.COLD_CONFIG && !existsSync(file);
+  return loadConfigFile(useExample ? example : file, useExample);
+}
+
+/** KEY=value lines from .env.local and .env next to cold.yaml. The real environment wins. */
+export function loadEnvFiles(root = ROOT): void {
+  for (const file of [path.join(root, ".env.local"), path.join(root, ".env")]) {
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+      if (m && process.env[m[1]!] === undefined) process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
+    }
   }
-  const { config, errors } = parseConfig(raw, path.basename(source), useExample);
-  if (!config) throw new Error(`${path.basename(source)} has problems:\n  - ${errors.join("\n  - ")}`);
-  return config;
 }
 
 export function getAccount(config: ColdConfig, key: string | undefined): Account {

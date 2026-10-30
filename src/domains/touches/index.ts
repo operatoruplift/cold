@@ -18,9 +18,9 @@ export function twentyClient(): TwentyClient | undefined {
 }
 
 /** The touch log the config asks for: Twenty, the local file, or Twenty when it is configured (auto). */
-export async function openStore(config: ColdConfig): Promise<TouchStore> {
+export async function openStore(config: ColdConfig, root = ROOT): Promise<TouchStore> {
   const client = twentyClient();
   if (config.store === "twenty" && !client) throw new Error("store: twenty needs TWENTY_BASE_URL and TWENTY_API_KEY in .env.local");
-  if (config.store !== "file" && client) return TwentyStore.open(client, path.resolve(ROOT, ".cold/unsaved.jsonl"));
-  return new FileStore(path.resolve(ROOT, config.logFile));
+  if (config.store !== "file" && client) return TwentyStore.open(client, path.resolve(root, ".cold/unsaved.jsonl"));
+  return new FileStore(path.resolve(root, config.logFile));
 }

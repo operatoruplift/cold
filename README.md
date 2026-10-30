@@ -14,16 +14,27 @@ call scripts and the Do Not Contact list.
 [![Bun](https://img.shields.io/badge/runtime-Bun-000000.svg)](https://bun.sh)
 [![Twenty CRM](https://img.shields.io/badge/CRM-Twenty-000000.svg)](https://twenty.com)
 
+<p align="center">
+  <img src="docs/screenshots/today.png" alt="Today: what's sent, what's due per campaign, and the latest activity" width="100%">
+</p>
+
 Pick a sequence, point it at a list, and `cold` works out who is due for which
 step today. It writes each message with the prospect's details, sends the
 emails from your own mailbox, and lines up the DMs for you to send. It stops
 for anyone who replied, bounced or asked to be left alone, and logs every
 touch on the prospect's record in Twenty. Every message comes in two voices:
 **personal**, sent from your own name and profiles, and **company**, sent from
-the brand or a rep.
+the brand or a rep. Use it from a web app on your own computer (`bun run ui`)
+or from the command line; both do the same thing.
 
 ## Why it works
 
+- **An app you can use, on your own computer.** `bun run ui` opens it in your
+  browser: campaigns that show who is due today, a Send button with live
+  progress you can stop, a DM queue with Copy and Open buttons, call scripts,
+  the message library with preview and editing, replies, stats and settings.
+  It follows the dialer's design, and your passwords never leave your
+  machine.
 - **The messages are the product.** 45 messages across cold email, LinkedIn,
   X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message
@@ -81,10 +92,74 @@ real data:
 bun run cold preview founder-direct --source csv:examples/prospects.csv --prospect "Shine Detail"
 ```
 
-## Run your own in five commands
+## The app
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/email-send.png" alt="An email campaign mid-send: progress, and who got step 1"></td>
+    <td><img src="docs/screenshots/dm-queue.png" alt="The LinkedIn DM queue: the message written, Copy, Open profile, then what happened"></td>
+  </tr>
+  <tr>
+    <td><b>Email campaigns.</b> Who is due, every email written out, then Send. It goes out one at a time with live progress, and you can stop it.</td>
+    <td><b>The DM queue.</b> The next DM written for you. Copy it, open the profile, send it yourself, then press Sent, Replied or Opted out.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/call-scripts.png" alt="Call scripts with sections and objection answers"></td>
+    <td><img src="docs/screenshots/library.png" alt="The message library editor with variables"></td>
+  </tr>
+  <tr>
+    <td><b>Call scripts.</b> Filled in for a prospect, with every objection answer. Sync them into the dialer with one button.</td>
+    <td><b>The library.</b> Read every message filled in for a real prospect, edit it, and save. Saving runs the same lint as CI.</td>
+  </tr>
+</table>
+
+| Page | What it does |
+|---|---|
+| Today | What's been sent, replies and opt-outs this week, and what's due in each campaign. |
+| Campaigns | A sequence, the account that sends it, an offer and a prospect list (upload a CSV or use Twenty). |
+| Campaign | Due now, waiting, skipped and held back, with reasons. Emails: Send, with live progress. DMs: the queue, plus a checklist download for a VA. |
+| Call scripts | Every script and objection answer, filled in for a prospect. Sync to the dialer. |
+| Message library | Every message, previewed with real data, editable in place. |
+| Replies | Check an inbox for replies, opt-outs and bounces, and see the last 30 days. |
+| Stats | Reply rate per sequence and per message. |
+| Settings | Create `cold.yaml`, edit it (it is checked before saving), set the mailbox URLs and Twenty key, test each connection, and set up Twenty. |
+
+It listens on `127.0.0.1:4100` only (`COLD_UI_PORT` changes the port). It
+refuses requests that come from other websites: it checks the `Host` and
+`Origin` headers and requires its own header on every API call. Mailbox
+passwords and the Twenty key stay in `.env.local`. Keep the app open while a
+send is running; the send stops if the app is closed.
+
+## Run your own
 
 You need [Bun](https://bun.sh). Twenty is optional: without it the touch log is
 a local file.
+
+```bash
+git clone https://github.com/operatoruplift/cold.git && cd cold
+```
+
+```bash
+bun install
+```
+
+```bash
+bun run ui
+```
+
+Your browser opens at http://localhost:4100. Then:
+
+1. **Settings.** Create `cold.yaml` from the example, then replace the example
+   sender and offer with yours. Under Connections, add your mailbox's SMTP URL
+   (and IMAP, to read replies) and, optionally, your Twenty URL and key. Press
+   Test sending, then Set up Twenty.
+2. **Campaigns.** New campaign: pick a sequence, the account that sends it, and
+   a prospect list (upload a CSV, or a Twenty source). Open it, read the
+   emails, and press Send. For DMs, work through the queue.
+
+### From the terminal
+
+The same in five commands, without the app:
 
 ```bash
 git clone https://github.com/operatoruplift/cold.git && cd cold
@@ -263,6 +338,7 @@ records go to `.cold/touches.jsonl`.
 
 | Command | What it does |
 |---|---|
+| `bun run ui` | The app, at http://localhost:4100 (`--no-open` to not open a browser, `--dev` to rebuild on change) |
 | `cold list` | Every sequence and script, with when to use it |
 | `cold lint` | Check every message; exits 1 on an error |
 | `cold variables` | The variables a message can use |
@@ -320,7 +396,9 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 messages/                 the library (see messages/README.md)
 src/
   cli.ts                  the cold command
+  web/                    the app: React pages, bundled by Bun
   domains/
+    web/                  the app's server: API, request guard, campaigns, send jobs
     messages/             load and lint the library
     render/               the template syntax and the variable contract
     config/               cold.yaml

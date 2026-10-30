@@ -3,12 +3,10 @@
  * cold: cold call scripts, cold DMs and cold emails for personal and company
  * accounts, with every touch kept in Twenty. `bun run cold help` for usage.
  */
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { parseArgs } from "node:util";
 import { callSheet, syncCallScripts } from "./domains/call";
 import { bold, cyan, dim, green, indent, red, table, terminalIo, yellow } from "./domains/cli/io";
-import { getAccount, getOffer, loadConfig, ROOT, type Account, type ColdConfig } from "./domains/config";
+import { getAccount, getOffer, loadConfig, loadEnvFiles, type Account, type ColdConfig } from "./domains/config";
 import { runDm } from "./domains/dm";
 import { reacherFromEnv, runEmail, syncReplies } from "./domains/email";
 import { CHANNELS, findMessage, findSequence, loadLibrary, VOICES, type Library, type Message, type Voice } from "./domains/messages";
@@ -52,17 +50,6 @@ ${bold("Results")}
 Sources: ${SOURCES_HELP}
 Ids can be shortened to any unique ending: founder-direct, call/company/gatekeeper.
 `;
-
-/** .env.local and .env next to cold.yaml, for runs from another directory. Real env wins. */
-function loadEnvFiles(): void {
-  for (const file of [path.join(ROOT, ".env.local"), path.join(ROOT, ".env")]) {
-    if (!existsSync(file)) continue;
-    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
-      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-      if (m && process.env[m[1]!] === undefined) process.env[m[1]!] = m[2]!.replace(/^["']|["']$/g, "");
-    }
-  }
-}
 
 class UsageError extends Error {}
 

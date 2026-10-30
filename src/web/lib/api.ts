@@ -1,0 +1,60 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/** An API refusal, with the server's words and any extra detail (lint issues, config errors). */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly data: Record<string, unknown> = {},
+  ) {
+    super(message);
+  }
+}
+
+/** Call the local API. Every request carries the x-cold header the server requires. */
+export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+  const response = await fetch(path, {
+    method: options.method ?? "GET",
+    headers: { "x-cold": "1", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  const text = await response.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    data = { error: text };
+  }
+  if (!response.ok) {
+    const body = (data ?? {}) as Record<string, unknown>;
+    throw new ApiError(response.status, typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`, body);
+  }
+  return data as T;
+}
+
+export interface Loaded<T> {
+  data?: T;
+  error?: ApiError;
+  loading: boolean;
+  reload: () => void;
+}
+
+/** GET a path and keep the result. A null path loads nothing. Stale answers are ignored. */
+export function useApi<T>(path: string | null): Loaded<T> {
+  const [state, setState] = useState<{ data?: T; error?: ApiError; loading: boolean }>({ loading: path !== null });
+  const [tick, setTick] = useState(0);
+  const current = useRef(0);
+  useEffect(() => {
+    if (path === null) {
+      setState({ loading: false });
+      return;
+    }
+    const call = ++current.current;
+    setState((s) => ({ ...s, loading: true }));
+    api<T>(path)
+      .then((data) => call === current.current && setState({ data, loading: false }))
+      .catch((error: ApiError) => call === current.current && setState({ error, loading: false }));
+  }, [path, tick]);
+  const reload = useCallback(() => setTick((t) => t + 1), []);
+  return { ...state, reload };
+}
