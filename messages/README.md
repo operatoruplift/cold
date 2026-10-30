@@ -21,6 +21,7 @@ messages/
       linkedin/              1-connection-note  2-after-accept  3-video-offer  4-leave-it
       x/                     1-opener  2-bump
       instagram/             1-opener  2-bump
+      facebook/              1-opener  2-bump
     company/               from the brand accounts (LinkedIn: a rep's profile)
       linkedin/              1-connection-note  2-after-accept  3-leave-it
       x/                     1-opener  2-bump
@@ -46,7 +47,9 @@ from the account, not the prospect.
 | On a call | "I run the company" | "the reason for my call" |
 
 A company LinkedIn page cannot start a conversation, so company LinkedIn DMs
-are sent by a rep from their own profile, written in the company voice.
+are sent by a rep from their own profile, written in the company voice. A
+Facebook Page cannot message someone first either, so Facebook DMs are
+personal only.
 
 ## How a message file looks
 
@@ -123,6 +126,7 @@ shapes described, because the messages are written around them.
 | `{{linkedin_url}}` | Where LinkedIn DMs go | https://www.linkedin.com/in/dana-reyes |
 | `{{x_handle}}` | Where X DMs go, no @ | clearviewtint |
 | `{{instagram_handle}}` | Where Instagram DMs go, no @ | clearviewtint |
+| `{{facebook_url}}` | Where Facebook DMs go | https://www.facebook.com/clearviewtint |
 | `{{video_url}}` | A video recorded for them (Cap, Loom) | https://cap.so/s/clearview-tint |
 | `{{page_url}}` | A page built for them | https://offer.example/clearview-tint |
 | `{{trigger}}` | One full sentence: why them, why now. Specific and true. | Saw you just opened a second bay in Round Rock. |

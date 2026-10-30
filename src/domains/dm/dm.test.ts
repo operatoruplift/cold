@@ -45,6 +45,8 @@ describe("dmTarget", () => {
     expect(dmTarget("x", p)).toBe("https://x.com/clearviewtint");
     expect(dmTarget("instagram", p)).toBe("https://ig.me/m/clearviewtint");
     expect(dmTarget("facebook", p)).toBeUndefined();
+    expect(dmTarget("facebook", prospects[2]!)).toBe("https://m.me/shinedetailco");
+    expect(dmTarget("facebook", { ...p, facebookUrl: "https://www.facebook.com/profile.php?id=1000" })).toBe("https://www.facebook.com/profile.php?id=1000");
   });
 });
 

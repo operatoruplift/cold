@@ -4,9 +4,9 @@
 
 First release.
 
-- The message library: 7 email sequences, 6 DM sequences (LinkedIn, X,
-  Instagram), 7 call scripts and 11 objections, each channel in a personal and
-  a company voice.
+- The message library: 7 email sequences, 7 DM sequences (LinkedIn, X,
+  Instagram, Facebook), 7 call scripts and 11 objections, in a personal and a
+  company voice (Facebook DMs are personal only: a Page cannot message first).
 - Template syntax with fallbacks and per-prospect variants, a variable contract,
   and a linter for every message.
 - `cold email run`: due steps from your own mailbox over SMTP, threaded

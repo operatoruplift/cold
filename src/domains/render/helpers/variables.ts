@@ -23,6 +23,7 @@ export const VARIABLES: VariableSpec[] = [
   { name: "linkedin_url", scope: "prospect", description: "LinkedIn profile URL (where LinkedIn DMs go).", example: "https://www.linkedin.com/in/dana-reyes" },
   { name: "x_handle", scope: "prospect", description: "X handle without the @ (where X DMs go).", example: "clearviewtint" },
   { name: "instagram_handle", scope: "prospect", description: "Instagram handle without the @ (where Instagram DMs go).", example: "clearviewtint" },
+  { name: "facebook_url", scope: "prospect", description: "Facebook profile URL (where Facebook DMs go).", example: "https://www.facebook.com/clearviewtint" },
   { name: "video_url", scope: "prospect", description: "A video recorded for this prospect (Cap, Loom).", example: "https://cap.so/s/clearview-tint" },
   { name: "page_url", scope: "prospect", description: "A page built for this prospect.", example: "https://offer.example/clearview-tint" },
   {

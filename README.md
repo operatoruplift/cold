@@ -23,8 +23,8 @@ the brand or a rep.
 
 ## Why it works
 
-- **The messages are the product.** 43 messages across cold email, LinkedIn, X
-  and Instagram DMs, and call scripts, plus 11 objection answers. Every
+- **The messages are the product.** 45 messages across cold email, LinkedIn,
+  X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message
   is a plain Markdown file you can read on GitHub and edit like any other text.
 - **Nothing reads like a template.** Every message is built around one line
@@ -62,6 +62,7 @@ the brand or a rep.
 | **LinkedIn** | connection note, after accept, video offer, leave it | connection note, after accept, leave it (from a rep's profile) |
 | **X** | opener, bump | opener, bump (brand account) |
 | **Instagram** | opener, bump | opener, bump (brand account) |
+| **Facebook** | opener, bump | none: a Page cannot message first |
 | **Calls** | founder direct, warm follow-up, voicemail | reason for the call, gatekeeper, callback, voicemail |
 | **Objections** | 11, answered as "I" | the same 11, answered as "we" |
 
