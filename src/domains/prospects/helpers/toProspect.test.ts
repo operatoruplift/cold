@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { linkedinSlug, socialHandle, toSnakeCase, websiteHost } from "./normalize";
+import { linkedinSlug, socialHandle, toIdentity, toSnakeCase, websiteHost } from "./normalize";
 import { parseCsv } from "./parseCsv";
 import { fromAgencyPerson, fromAgencyProspect, fromCsvRow, fromPerson } from "./toProspect";
 
@@ -22,6 +22,22 @@ describe("normalizers", () => {
     expect(socialHandle("https://x.com/ClearviewTint")).toBe("clearviewtint");
     expect(socialHandle("@shine.detail")).toBe("shine.detail");
     expect(websiteHost("https://www.Clearview.com/book?x=1")).toBe("clearview.com");
+  });
+
+  test("a malformed LinkedIn URL does not throw", () => {
+    expect(linkedinSlug("https://www.linkedin.com/in/dana%E0%A4%A")).toBe("dana%e0%a4%a");
+  });
+
+  test("toIdentity matches how sources key prospects, and refuses bare names", () => {
+    expect(toIdentity("Dana@Clearview.example")).toBe("email:dana@clearview.example");
+    expect(toIdentity("linkedin:Dana-Reyes-Example")).toBe("linkedin:dana-reyes-example");
+    expect(toIdentity("https://www.linkedin.com/in/Dana-Reyes-Example/")).toBe("linkedin:dana-reyes-example");
+    expect(toIdentity("@ClearviewTint")).toBe("x:clearviewtint");
+    expect(toIdentity("https://x.com/ClearviewTint")).toBe("x:clearviewtint");
+    expect(toIdentity("https://www.instagram.com/ShineDetailCo")).toBe("instagram:shinedetailco");
+    expect(toIdentity("instagram:ShineDetailCo")).toBe("instagram:shinedetailco");
+    expect(toIdentity("person:7a1e-UUID")).toBe("person:7a1e-UUID");
+    expect(toIdentity("Dana Reyes")).toBeUndefined();
   });
 });
 

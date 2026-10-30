@@ -14,10 +14,15 @@ export function normalizeEmail(value: string | undefined): string | undefined {
   return v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? v : undefined;
 }
 
-/** "https://www.linkedin.com/in/Dana-Reyes/?x=1" -> "dana-reyes". */
+/** "https://www.linkedin.com/in/Dana-Reyes/?x=1" -> "dana-reyes". A malformed escape is kept as written. */
 export function linkedinSlug(value: string | undefined): string | undefined {
   const m = value ? /linkedin\.com\/(?:in|company)\/([^/?#\s]+)/i.exec(value) : null;
-  return m ? decodeURIComponent(m[1]!).toLowerCase() : undefined;
+  if (!m) return undefined;
+  try {
+    return decodeURIComponent(m[1]!).toLowerCase();
+  } catch {
+    return m[1]!.toLowerCase();
+  }
 }
 
 /** "@Dana", "https://x.com/Dana", "twitter.com/dana" -> "dana". */
@@ -46,4 +51,37 @@ export function splitName(full: string | undefined): [string | undefined, string
 /** "yes", "true", "1", "x" -> true. */
 export function isTruthy(value: string | undefined): boolean {
   return /^(1|y|yes|true|x|dnc|do_not_contact)$/i.test(value?.trim() ?? "");
+}
+
+/** Record-id identities are case-sensitive and kept as typed. */
+const RECORD_IDENTITY = /^(person|agencyProspect|agencyPerson|csv|people|agencyProspects|agencyPeople):\S+$/;
+
+/**
+ * Turn what someone types into the identity prospects are keyed by, the same
+ * way the sources build them: an email address -> "email:dana@x.com", a
+ * LinkedIn URL or "linkedin:Dana-Reyes" -> "linkedin:dana-reyes", "@handle",
+ * an X or Instagram URL, "x:Handle" -> "x:handle", record ids as given.
+ * Undefined for anything else, such as a bare name. Pure.
+ */
+export function toIdentity(input: string): string | undefined {
+  const v = input.trim();
+  const email = normalizeEmail(v);
+  if (email) return `email:${email}`;
+  const slug = linkedinSlug(v);
+  if (slug) return `linkedin:${slug}`;
+  const prefixed = /^(linkedin|x|instagram):(.+)$/i.exec(v);
+  if (prefixed) {
+    const kind = prefixed[1]!.toLowerCase();
+    const value = kind === "linkedin" ? prefixed[2]!.toLowerCase() : socialHandle(prefixed[2]);
+    return value ? `${kind}:${value}` : undefined;
+  }
+  if (/instagram\.com\//i.test(v)) {
+    const handle = socialHandle(v);
+    return handle ? `instagram:${handle}` : undefined;
+  }
+  if (/^@/.test(v) || /(x|twitter)\.com\//i.test(v)) {
+    const handle = socialHandle(v);
+    return handle ? `x:${handle}` : undefined;
+  }
+  return RECORD_IDENTITY.test(v) ? v : undefined;
 }

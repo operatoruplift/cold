@@ -13,7 +13,9 @@ First release.
   follow-ups, daily caps, a sending window, opt-out footer and
   `List-Unsubscribe`.
 - `cold email sync`: replies, opt-outs and bounces from IMAP; out-of-office
-  ignored.
+  replies and delivery delays ignored; per-recipient delivery reports.
+- Never the same email twice: one message per address per run, and a send that
+  cannot be logged stops the run and is saved before the next one plans.
 - `cold dm run`: the day's DMs, copied and opened for you to send, logged when
   you say.
 - `cold call sync` and `cold call sheet`: scripts into the dialer's

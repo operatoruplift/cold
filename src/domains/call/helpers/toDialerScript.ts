@@ -27,14 +27,16 @@ export function scriptToPlainText(markdown: string): string {
 }
 
 /**
- * A call script as an agencyScripts row for the dialer. Account and offer
- * variables are filled in; prospect variables ({{first_name}}, {{company}})
- * stay in braces for the rep to read off the contact on screen. Pure.
+ * A call script as an agencyScripts row for the dialer, named with its voice
+ * ("Voicemail (personal)", "Voicemail (company)") so the two never overwrite
+ * each other. Account and offer variables are filled in; prospect variables
+ * ({{first_name}}, {{company}}) stay in braces for the rep to read off the
+ * contact on screen. Pure.
  */
 export function toDialerScript(script: Message, objections: Objection[], voice: Voice, variables: Variables): { name: string; scriptData: DialerScriptData } {
   const partial = (text: string, seed: string) => renderTemplate(text, variables, { mode: "partial", seed }).text;
   return {
-    name: script.title,
+    name: `${script.title} (${voice})`,
     scriptData: {
       category: script.category ?? "General",
       content: scriptToPlainText(partial(script.body, script.id)),

@@ -123,6 +123,18 @@ describe("runEmail", () => {
     expect(out.text()).toMatch(/opted out/);
   });
 
+  test("an unsubscribe from an address never emailed is still honoured for that address", async () => {
+    await run(MONDAY, fakeTransport().transport);
+    const inbox: MailboxMessage[] = [
+      { messageId: "<u1@x>", references: [], from: "alias@forwarder.example", date: new Date(MONDAY.getTime() + DAY), email: { from: "alias@forwarder.example", subject: "unsubscribe", text: "", headers: {} } },
+    ];
+    const out = fakeIo();
+    const result = await syncReplies({ account: config.accounts.personal!, store, days: 14, io: out.io, reader: { read: async () => inbox }, now: () => new Date(MONDAY.getTime() + 2 * DAY) });
+    expect(result.optedOut).toBe(1);
+    expect((await store.suppressions()).map((t) => t.prospectKey)).toEqual(["email:alias@forwarder.example"]);
+    expect(out.text()).toContain("not an address you emailed");
+  });
+
   test("respects the daily cap and --limit", async () => {
     const account = { ...config.accounts.personal!, email: { ...config.accounts.personal!.email!, dailyCap: 2 } };
     const { transport, sent } = fakeTransport();
@@ -163,16 +175,50 @@ describe("runEmail", () => {
     const auth = Object.assign(new Error("Invalid login"), { code: "EAUTH" });
     const { transport } = fakeTransport(() => auth);
     const result = await run(MONDAY, transport);
-    expect(result).toMatchObject({ sent: 0, failed: 1, aborted: "the mailbox stopped accepting mail (EAUTH)" });
+    expect(result).toMatchObject({ sent: 0, failed: 1 });
+    expect(result.aborted).toStartWith("the mailbox stopped accepting mail (EAUTH");
     expect((await store.since("2000-01-01T00:00:00Z", { kind: "FAILED" })).length).toBe(1);
   });
 
   test("a 5xx recipient rejection is logged as a bounce and suppresses the address", async () => {
-    const rejected = Object.assign(new Error("550 No such user"), { code: "EENVELOPE", responseCode: 550 });
+    const rejected = Object.assign(new Error("550 5.1.1 No such user"), { code: "EENVELOPE", responseCode: 550, command: "RCPT TO" });
     const { transport, sent } = fakeTransport((d) => (d.to.startsWith("marcus") ? rejected : undefined));
     await run(MONDAY, transport);
     expect(sent.length).toBe(3);
     expect((await store.suppressions()).map((t) => [t.kind, t.toAddress])).toEqual([["BOUNCED", "marcus@hillcountrybody.example"]]);
+  });
+
+  test("a sender-side refusal (a sending limit on MAIL FROM) stops the run and suppresses nobody", async () => {
+    const limit = Object.assign(new Error("550 5.4.5 Daily user sending limit exceeded"), { code: "EENVELOPE", responseCode: 550, command: "MAIL FROM" });
+    const { transport, sent } = fakeTransport(() => limit);
+    const result = await run(MONDAY, transport);
+    expect(sent).toEqual([]);
+    expect(result.aborted).toMatch(/mailbox stopped accepting mail.*sending limit/);
+    expect(await store.suppressions()).toEqual([]);
+  });
+
+  test("when a sent email cannot be logged, the run stops so nothing is sent twice", async () => {
+    class FailingStore extends FileStore {
+      override async record(touch: Parameters<FileStore["record"]>[0]) {
+        if (touch.kind === "SENT") throw new Error("Twenty is down");
+        return super.record(touch);
+      }
+    }
+    const failing = new FailingStore(path.join(dir, "touches.jsonl"));
+    const { transport, sent } = fakeTransport();
+    const result = await run(MONDAY, transport, { store: failing });
+    expect(sent.length).toBe(1);
+    expect(result.sent).toBe(1);
+    expect(result.aborted).toMatch(/could not be logged: Twenty is down/);
+  });
+
+  test("checks the sending window before every email, not just the first", async () => {
+    // Monday 16:57 in Chicago; the window ends at 17:00 and the gap between emails is two minutes.
+    let clock = new Date("2026-11-02T22:57:00Z").getTime();
+    const { transport, sent } = fakeTransport();
+    const result = await run(new Date(clock), transport, { now: () => new Date(clock), sleep: async (ms) => void (clock += ms), random: () => 0.5 });
+    expect(sent.length).toBe(2);
+    expect(result.aborted).toMatch(/sending window closed .*2 left for next time/);
   });
 
   test("Reacher's invalid verdict skips the first email and suppresses the address", async () => {

@@ -1,11 +1,12 @@
 import type { Message, Sequence } from "../../messages";
 import type { Prospect } from "../../prospects";
 import type { Touch, TouchChannel } from "../types";
+import { addDays, localDay } from "./localDay";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** A sequence that has not sent for this long no longer counts as active. */
+/** Another sequence that reached someone this recently on the same channel blocks a new one. */
 const ACTIVE_WINDOW_DAYS = 30;
-/** After a reply on any channel, nothing new starts automatically for this long. */
+/** After a reply on any channel, nothing more goes out automatically for this long. */
 const REPLY_HOLD_DAYS = 90;
 
 /** Touches that end a sequence for a prospect. */
@@ -21,8 +22,10 @@ export interface PlanInput {
   /** Opt-outs, bounces and undeliverable verdicts, any prospect. */
   suppressions: Touch[];
   now: Date;
-  /** Can this prospect be reached on the channel at all (has an email, a LinkedIn URL...)? */
+  /** Where the prospect is reached on the channel (email address, profile URL), or undefined. */
   reachable: (prospect: Prospect) => string | undefined;
+  /** The sender's timezone: a step on "day 3" is due on the third calendar day there. Defaults to the machine's. */
+  timeZone?: string;
 }
 
 export interface DueItem {
@@ -44,14 +47,17 @@ export interface SkippedItem {
 export interface Plan {
   due: DueItem[];
   skipped: SkippedItem[];
-  /** Prospects with a step coming up later, and when. */
-  waiting: Array<{ prospect: Prospect; step: Message; dueAt: Date }>;
+  /** Prospects with a step due on a later day: YYYY-MM-DD in the sender's timezone. */
+  waiting: Array<{ prospect: Prospect; step: Message; dueOn: string }>;
 }
 
 const touchesOf = (prospect: Prospect, touches: Touch[]) => {
   const ids = new Set(prospect.identities);
   return touches.filter((t) => ids.has(t.prospectKey) || (t.toAddress && ids.has(`email:${t.toAddress.toLowerCase()}`)));
 };
+
+/** An address compared loosely: case, a trailing slash, a query string. */
+const addressKey = (address: string) => address.trim().toLowerCase().replace(/[?#].*$/, "").replace(/\/+$/, "");
 
 /**
  * Suppressed when the source says Do Not Contact, when the prospect ever
@@ -70,22 +76,28 @@ export function suppressionReason(prospect: Prospect, suppressions: Touch[], cha
 }
 
 /**
- * Work out, for every prospect, whether a step of this sequence is due now.
+ * Work out, for every prospect, whether a step of this sequence is due today.
  * Pure. The rules:
  *
+ *  - one address gets one message per run: a second prospect with the same
+ *    email address or profile is skipped;
  *  - suppressed prospects are skipped (see suppressionReason);
+ *  - a reply anywhere in the last 90 days, on any channel and in any
+ *    sequence, stops everything automatic: a reply is a conversation, and
+ *    that is yours to carry on by hand;
  *  - a reply, opt-out or bounce in this sequence ends it;
- *  - step N is due `day` days after step 1 went out, and never sooner after
- *    step N-1 than the gap between their days;
+ *  - step N falls due on calendar day `day` after step 1 went out, in the
+ *    sender's timezone, and never sooner after step N-1 than the gap
+ *    between their days;
  *  - nobody starts a sequence within 30 days of another sequence on the same
- *    channel reaching them, so two sequences never overlap in someone's inbox;
- *  - nobody who replied anywhere in the last 90 days is started on anything:
- *    a reply is a conversation, and that is yours to carry on by hand.
+ *    channel reaching them, so two never overlap in someone's inbox.
  */
 export function planSequence(input: PlanInput): Plan {
-  const { sequence, channel, now } = input;
+  const { sequence, channel, now, timeZone } = input;
   const plan: Plan = { due: [], skipped: [], waiting: [] };
   const lastStep = sequence.steps[sequence.steps.length - 1]?.step ?? 0;
+  const today = localDay(now, timeZone);
+  const claimed = new Map<string, Prospect>();
 
   for (const prospect of input.prospects) {
     const skip = (reason: string) => plan.skipped.push({ prospect, reason });
@@ -94,6 +106,13 @@ export function planSequence(input: PlanInput): Plan {
       skip(`no ${channel === "EMAIL" ? "email address" : `${channel.toLowerCase()} profile`}`);
       continue;
     }
+    const twin = claimed.get(addressKey(address));
+    if (twin) {
+      skip(`same ${channel === "EMAIL" ? "email address" : "profile"} as ${twin.label}`);
+      continue;
+    }
+    claimed.set(addressKey(address), prospect);
+
     const suppressed = suppressionReason(prospect, input.suppressions, channel);
     if (suppressed) {
       skip(suppressed);
@@ -101,6 +120,14 @@ export function planSequence(input: PlanInput): Plan {
     }
 
     const mine = touchesOf(prospect, input.history);
+    const reply = mine
+      .filter((t) => t.kind === "REPLIED" && now.getTime() - new Date(t.occurredAt).getTime() < REPLY_HOLD_DAYS * DAY_MS)
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
+    if (reply) {
+      skip(`replied on ${reply.occurredAt.slice(0, 10)}${reply.sequence ? ` (${reply.sequence})` : ` (${reply.channel.toLowerCase()})`}; carry on by hand`);
+      continue;
+    }
+
     const inSequence = mine.filter((t) => t.sequence === sequence.id).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
     const stopper = inSequence.find((t) => STOPPERS.has(t.kind));
     if (stopper) {
@@ -122,11 +149,6 @@ export function planSequence(input: PlanInput): Plan {
     }
 
     if (!lastSent) {
-      const reply = mine.find((t) => t.kind === "REPLIED" && now.getTime() - new Date(t.occurredAt).getTime() < REPLY_HOLD_DAYS * DAY_MS);
-      if (reply) {
-        skip(`replied on ${reply.occurredAt.slice(0, 10)}${reply.sequence ? ` (${reply.sequence})` : ""}; carry on by hand`);
-        continue;
-      }
       const busy = activeElsewhere(mine, sequence.id, channel, now);
       if (busy) {
         skip(`already in ${busy}`);
@@ -138,11 +160,10 @@ export function planSequence(input: PlanInput): Plan {
 
     const first = sent.find((t) => t.step === 1) ?? sent[0]!;
     const previousStep = sequence.steps.find((s) => s.step === sentStep);
-    const fromFirst = new Date(first.occurredAt).getTime() + (next.day ?? 0) * DAY_MS;
-    const gap = Math.max(0, (next.day ?? 0) - (previousStep?.day ?? 0));
-    const fromPrevious = new Date(lastSent.occurredAt).getTime() + gap * DAY_MS;
-    const dueAt = new Date(Math.max(fromFirst, fromPrevious));
-    if (dueAt.getTime() > now.getTime()) plan.waiting.push({ prospect, step: next, dueAt });
+    const fromFirst = addDays(localDay(first.occurredAt, timeZone), next.day ?? 0);
+    const fromPrevious = addDays(localDay(lastSent.occurredAt, timeZone), Math.max(1, (next.day ?? 0) - (previousStep?.day ?? 0)));
+    const dueOn = fromFirst > fromPrevious ? fromFirst : fromPrevious;
+    if (dueOn > today) plan.waiting.push({ prospect, step: next, dueOn });
     else plan.due.push({ prospect, step: next, address, previous: lastSent, first });
   }
   return plan;
@@ -159,9 +180,7 @@ function activeElsewhere(mine: Touch[], sequenceId: string, channel: TouchChanne
     if (touches.some((t) => STOPPERS.has(t.kind))) continue;
     const sent = touches.filter((t) => t.kind === "SENT").sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
     const last = sent[sent.length - 1];
-    if (!last) continue;
-    const recent = now.getTime() - new Date(last.occurredAt).getTime() < ACTIVE_WINDOW_DAYS * DAY_MS;
-    if (recent) return id;
+    if (last && now.getTime() - new Date(last.occurredAt).getTime() < ACTIVE_WINDOW_DAYS * DAY_MS) return id;
   }
   return undefined;
 }

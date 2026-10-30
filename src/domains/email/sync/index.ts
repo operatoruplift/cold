@@ -21,13 +21,14 @@ export interface MailboxMessage {
 /** Reads recent mail. The IMAP one is below; tests pass a list. */
 export interface MailboxReader {
   /** Messages since a date, only fully downloaded when `wanted` says so. */
-  read(since: Date, wanted: (envelope: { from?: string; inReplyTo?: string }) => boolean): Promise<MailboxMessage[]>;
+  read(since: Date, wanted: (envelope: { from?: string; inReplyTo?: string; subject?: string }) => boolean): Promise<MailboxMessage[]>;
 }
 
 export interface SyncResult {
   replied: number;
   optedOut: number;
   bounced: number;
+  /** Out-of-office replies and delivery delays: logged nowhere, the sequence carries on. */
   autoReplies: number;
 }
 
@@ -79,7 +80,7 @@ export function imapReader(account: Account): MailboxReader {
         const picked: number[] = [];
         if (uids.length) {
           for await (const msg of client.fetch(uids, { envelope: true, uid: true }, { uid: true })) {
-            if (wanted({ from: msg.envelope?.from?.[0]?.address, inReplyTo: msg.envelope?.inReplyTo })) picked.push(msg.uid);
+            if (wanted({ from: msg.envelope?.from?.[0]?.address, inReplyTo: msg.envelope?.inReplyTo, subject: msg.envelope?.subject })) picked.push(msg.uid);
           }
         }
         // Commands may not run inside a fetch loop, so the full messages come after it.
@@ -123,15 +124,16 @@ export async function syncReplies(input: { account: Account; store: TouchStore; 
   }
 
   const reader = input.reader ?? imapReader(account);
-  const messages = await reader.read(since, ({ from, inReplyTo }) => {
+  const messages = await reader.read(since, ({ from, inReplyTo, subject }) => {
     const address = from?.toLowerCase() ?? "";
-    return byAddress.has(address) || (!!inReplyTo && byMessageId.has(inReplyTo)) || /mailer-daemon|postmaster/i.test(address);
+    // Also every "unsubscribe" email (the List-Unsubscribe mailto), even from an address never emailed.
+    return byAddress.has(address) || (!!inReplyTo && byMessageId.has(inReplyTo)) || /mailer-daemon|postmaster/i.test(address) || /^\s*unsubscribe\b/i.test(subject ?? "");
   });
 
   for (const message of messages) {
     if (message.messageId && seen.has(message.messageId)) continue;
     const verdict = classifyInbound(message.email);
-    if (verdict.kind === "AUTO_REPLY") {
+    if (verdict.kind === "AUTO_REPLY" || verdict.kind === "DELAYED") {
       result.autoReplies++;
       continue;
     }
@@ -146,6 +148,26 @@ export async function syncReplies(input: { account: Account; store: TouchStore; 
       const byThread = [message.inReplyTo, ...message.references].map((id) => (id ? byMessageId.get(id) : undefined)).find(Boolean);
       const t = byThread ?? (message.from ? byAddress.get(message.from) : undefined);
       if (t) matches.push(t);
+    }
+
+    if (verdict.kind === "OPTED_OUT" && matches.length === 0 && message.from) {
+      // An unsubscribe from an address that was never emailed (a forward, an alias): suppress that address too, and say so.
+      await store.record({
+        kind: "OPTED_OUT",
+        channel: "EMAIL",
+        account: account.key,
+        prospectKey: `email:${message.from}`,
+        toAddress: message.from,
+        fromAddress: message.from,
+        subject: message.email.subject,
+        body: (verdict.newText || "").slice(0, 4000),
+        messageId: message.messageId,
+        occurredAt: message.date.toISOString(),
+      });
+      if (message.messageId) seen.add(message.messageId);
+      result.optedOut++;
+      io.log(`${red("opted out")} ${message.from} ${yellow("(not an address you emailed: check who it forwards for, and log them by hand with cold log)")}`);
+      continue;
     }
 
     for (const original of matches) {

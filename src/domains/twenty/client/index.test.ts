@@ -38,7 +38,7 @@ describe("TwentyClient.list", () => {
     expect(all.length).toBe(450);
     expect(urls.length).toBe(3);
     expect(urls[1]).toContain('and(kind[eq]:"SENT",id[gt]:"id-0199")');
-    expect(urls.every((u) => u.includes("orderBy=id[AscNullsFirst]"))).toBe(true);
+    expect(urls.every((u) => u.includes("order_by=id[AscNullsFirst]"))).toBe(true);
   });
 
   test("explains a failure in words", async () => {

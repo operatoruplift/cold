@@ -9,7 +9,7 @@ import type { TouchStore } from "./types";
 export * from "./types";
 export * from "./helpers";
 export { FileStore } from "./fileStore";
-export { TwentyStore, touchName } from "./twentyStore";
+export { TouchNotSavedError, TwentyStore, touchName } from "./twentyStore";
 
 /** The Twenty client when TWENTY_BASE_URL and TWENTY_API_KEY are set. */
 export function twentyClient(): TwentyClient | undefined {
@@ -21,6 +21,6 @@ export function twentyClient(): TwentyClient | undefined {
 export async function openStore(config: ColdConfig): Promise<TouchStore> {
   const client = twentyClient();
   if (config.store === "twenty" && !client) throw new Error("store: twenty needs TWENTY_BASE_URL and TWENTY_API_KEY in .env.local");
-  if (config.store !== "file" && client) return TwentyStore.open(client);
+  if (config.store !== "file" && client) return TwentyStore.open(client, path.resolve(ROOT, ".cold/unsaved.jsonl"));
   return new FileStore(path.resolve(ROOT, config.logFile));
 }

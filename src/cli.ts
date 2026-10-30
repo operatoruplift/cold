@@ -13,7 +13,7 @@ import { runDm } from "./domains/dm";
 import { reacherFromEnv, runEmail, syncReplies } from "./domains/email";
 import { CHANNELS, findMessage, findSequence, loadLibrary, VOICES, type Library, type Message, type Voice } from "./domains/messages";
 import { buildVariables, renderForProspect } from "./domains/outreach";
-import { findProspect, loadProspects, normalizeEmail, SOURCES_HELP, type Prospect } from "./domains/prospects";
+import { findProspect, loadProspects, normalizeEmail, SOURCES_HELP, toIdentity, type Prospect } from "./domains/prospects";
 import { exampleVariables, VARIABLES } from "./domains/render";
 import { rate, summarize } from "./domains/stats";
 import { openStore, TOUCH_CHANNELS, TOUCH_KINDS, twentyClient, type Touch } from "./domains/touches";
@@ -320,6 +320,7 @@ async function call(sub: string | undefined, id: string | undefined): Promise<nu
   const config = loadConfig();
   const lib = library();
   if (sub === "sync") {
+    if (!flags["dry-run"]) requireRealConfig(config);
     const client = twentyClient();
     if (!client) throw new UsageError("Set TWENTY_BASE_URL and TWENTY_API_KEY in .env.local: call scripts sync into the dialer's agencyScripts.");
     const voice = flags.account ? getAccount(config, flags.account).voice : undefined;
@@ -371,12 +372,14 @@ async function log(who: string | undefined): Promise<number> {
   if (!TOUCH_KINDS.includes(kind)) throw new UsageError(`--kind is one of ${TOUCH_KINDS.join(", ")}`);
   if (!TOUCH_CHANNELS.includes(channel)) throw new UsageError(`--channel is one of ${TOUCH_CHANNELS.join(", ")}`);
   const config = loadConfig();
-  const store = await openStore(config);
   let prospect: Prospect | undefined;
   if (flags.source) {
     prospect = findProspect(await prospectsFrom(flags.source), who);
     if (!prospect) throw new UsageError(`No prospect matching "${who}" in ${flags.source}`);
   }
+  const identity = prospect?.key ?? toIdentity(who);
+  if (!identity) throw new UsageError(`Can't tell who "${who}" is. Give an email address, a profile (linkedin:dana-reyes, x:handle, instagram:handle, or the profile URL), or add --source to look the name up.`);
+  const store = await openStore(config);
   const email = normalizeEmail(who);
   const account = flags.account ? getAccount(config, flags.account) : undefined;
   const sequence = flags.sequence ? findSequence(loadLibrary().library, flags.sequence) : undefined;
@@ -389,7 +392,7 @@ async function log(who: string | undefined): Promise<number> {
     sequence: sequence?.id ?? flags.sequence,
     step,
     templateId: sequence?.steps.find((m) => m.step === step)?.id,
-    prospectKey: prospect?.key ?? (email ? `email:${email}` : who),
+    prospectKey: identity,
     prospectLabel: prospect?.label,
     toAddress: email ?? prospect?.email,
     body: flags.note,
@@ -397,7 +400,7 @@ async function log(who: string | undefined): Promise<number> {
     links: prospect?.links,
   });
   if (kind === "OPTED_OUT") await store.markDoNotContact(prospect?.links);
-  io.log(`${green("logged")} ${kind} ${channel} for ${prospect?.label ?? who} ${dim(`(${store.where})`)}`);
+  io.log(`${green("logged")} ${kind} ${channel} for ${prospect?.label ?? identity} ${dim(`(${store.where})`)}`);
   return 0;
 }
 

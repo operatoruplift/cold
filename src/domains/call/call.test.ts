@@ -17,7 +17,7 @@ describe("toDialerScript", () => {
   test("fills the account and offer, keeps prospect variables for the rep", () => {
     const script = findMessage(library, "call/personal/founder-direct")!;
     const row = toDialerScript(script, library.objections, "personal", { ...config.accounts.personal!.variables, ...config.offers["booking-pages"]!.variables });
-    expect(row.name).toBe("Founder direct");
+    expect(row.name).toBe("Founder direct (personal)");
     expect(row.scriptData.category).toBe("Introduction");
     expect(row.scriptData.content).toStartWith("OPENER\nHi {{first_name}}, it's Alex, I run Brightside Studio.");
     expect(row.scriptData.content).toContain("WHY I CALLED\n{{trigger}} I build booking pages");
@@ -38,24 +38,33 @@ describe("toDialerScript", () => {
 });
 
 describe("syncCallScripts", () => {
-  test("creates missing scripts and updates existing ones by name", async () => {
+  test("creates missing scripts and updates existing ones by name and campaign", async () => {
     const calls: string[] = [];
+    const filters: string[] = [];
     const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       const method = init?.method ?? "GET";
       calls.push(`${method} ${url.pathname}`);
       if (method === "GET") {
         const filter = url.searchParams.get("filter") ?? "";
-        const rows = filter.includes('"Gatekeeper"') ? [{ id: "s1", name: "Gatekeeper" }] : [];
+        filters.push(filter);
+        const rows = filter.includes('"Gatekeeper (company)"') ? [{ id: "s1", name: "Gatekeeper (company)" }] : [];
         return new Response(JSON.stringify({ data: { agencyScripts: rows } }));
       }
       const body = JSON.parse(String(init?.body));
-      expect(JSON.parse(body.scriptData).content).toStartWith(body.name === "Voicemail" ? "VOICEMAIL" : "");
+      expect(JSON.parse(body.scriptData).content).toStartWith(body.name === "Voicemail (company)" ? "VOICEMAIL" : "");
       return new Response(JSON.stringify({ data: { createAgencyScript: { id: "new", ...body } } }));
     }) as typeof fetch;
     const client = new TwentyClient({ baseUrl: "https://crm.example", apiKey: "k" }, fakeFetch);
     const result = await syncCallScripts({ client, library, account: config.accounts.company!, offer: config.offers["booking-pages"], dryRun: false, io });
     expect(result).toEqual({ created: 3, updated: 1 });
     expect(calls).toContain("PATCH /rest/agencyScripts/s1");
+    expect(filters).toContain('and(name[eq]:"Reason for the call (company)",campaignIdId[is]:NULL)');
+  });
+
+  test("personal and company scripts with the same title stay separate", () => {
+    const personal = toDialerScript(findMessage(library, "call/personal/voicemail")!, library.objections, "personal", {});
+    const company = toDialerScript(findMessage(library, "call/company/voicemail")!, library.objections, "company", {});
+    expect(personal.name).not.toBe(company.name);
   });
 });

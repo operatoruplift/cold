@@ -7,7 +7,7 @@ import { buildVariables, renderForProspect, startOfDay } from "../../outreach";
 import type { Prospect } from "../../prospects";
 import { renderTemplate } from "../../render";
 import { planSequence, type Touch, type TouchStore } from "../../touches";
-import { addressOf, buildEmail, describeWindow, domainOf, isInWindow } from "../helpers";
+import { addressOf, buildEmail, classifySmtpFailure, describeWindow, domainOf, isInWindow } from "../helpers";
 import type { EmailDraft } from "../types";
 import type { Verifier } from "../verify";
 
@@ -48,9 +48,6 @@ export interface EmailRunResult {
   skipped: number;
   aborted?: string;
 }
-
-/** Errors that mean the mailbox itself is unusable: stop instead of failing every email. */
-const FATAL_CODES = new Set(["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET", "EDNS", "ETLS", "ENOAUTH", "EOAUTH2", "EPROXY"]);
 
 /** A transport from the account's SMTP URL env var. */
 export function smtpTransport(account: Account): MailTransport {
@@ -96,7 +93,7 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
 
   const identities = input.prospects.flatMap((p) => p.identities);
   const [history, suppressions] = await Promise.all([store.forProspects(identities), store.suppressions()]);
-  const plan = planSequence({ sequence, channel: "EMAIL", prospects: input.prospects, history, suppressions, now: now(), reachable: (p) => p.email });
+  const plan = planSequence({ sequence, channel: "EMAIL", prospects: input.prospects, history, suppressions, now: now(), reachable: (p) => p.email, timeZone: email.window?.timezone });
 
   const ready: Ready[] = [];
   const held: string[] = [];
@@ -132,8 +129,8 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
   if (plan.skipped.length) io.log(dim(`  skipped: ${countReasons(plan.skipped.map((s) => s.reason))}`));
   if (held.length) io.log(yellow(`  held back: ${countReasons(held)} (fill these in, then run again)`));
   if (plan.waiting.length) {
-    const next = [...plan.waiting].sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime())[0]!;
-    io.log(dim(`  next one due ${next.dueAt.toISOString().slice(0, 16).replace("T", " ")} UTC (${next.prospect.label}, step ${next.step.step})`));
+    const next = [...plan.waiting].sort((a, b) => a.dueOn.localeCompare(b.dueOn))[0]!;
+    io.log(dim(`  next one due on ${next.dueOn} (${next.prospect.label}, step ${next.step.step})`));
   }
   io.log(`  daily cap ${email.dailyCap}, ${sentToday} sent today: ${batch.length ? bold(`${batch.length} to send`) : "nothing to send"}`);
   if (ready.length > batch.length) io.log(dim(`  ${ready.length - batch.length} more wait for the cap or --limit`));
@@ -174,8 +171,26 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
   }
 
   let failuresInARow = 0;
+  /** Log a touch; when the store cannot, stop the run so nothing is sent unrecorded. */
+  const save = async (touch: Touch): Promise<boolean> => {
+    try {
+      await store.record(touch);
+      return true;
+    } catch (err) {
+      result.aborted = `a touch could not be logged: ${(err as Error).message}`;
+      io.log(red(`Stopping: ${result.aborted}`));
+      return false;
+    }
+  };
+
   try {
     for (const [index, r] of batch.entries()) {
+      if (index > 0 && email.window && !options.ignoreWindow && !isInWindow(now(), email.window)) {
+        result.aborted = `the sending window closed (${describeWindow(email.window)}); ${batch.length - index} left for next time`;
+        io.log(yellow(`Stopping: ${result.aborted}.`));
+        break;
+      }
+
       const base: Omit<Touch, "kind" | "occurredAt"> = {
         channel: "EMAIL",
         voice: account.voice === "personal" ? "PERSONAL" : "COMPANY",
@@ -193,28 +208,35 @@ export async function runEmail(input: EmailRunInput): Promise<EmailRunResult> {
       if (r.step.step === 1 && input.verifier) {
         const verdict = await input.verifier.check(r.address);
         if (verdict === "invalid") {
-          await store.record({ ...base, kind: "UNDELIVERABLE", error: "Reacher: invalid", occurredAt: now().toISOString() });
+          if (!(await save({ ...base, kind: "UNDELIVERABLE", error: "Reacher: invalid", occurredAt: now().toISOString() }))) break;
           io.log(`${yellow("skip")} ${r.prospect.label} <${r.address}>: verified undeliverable`);
           result.skipped++;
           continue;
         }
       }
 
+      let failure: (Error & { code?: string; responseCode?: number; command?: string }) | undefined;
       try {
         await transport.sendMail(r.draft);
-        await store.record({ ...base, kind: "SENT", subject: r.draft.subject, body: r.draft.text, messageId: r.draft.messageId, occurredAt: now().toISOString() });
+      } catch (err) {
+        failure = err as Error & { code?: string; responseCode?: number; command?: string };
+      }
+
+      if (!failure) {
+        // Sent: from here on it must be logged before anything else goes out.
         result.sent++;
+        if (!(await save({ ...base, kind: "SENT", subject: r.draft.subject, body: r.draft.text, messageId: r.draft.messageId, occurredAt: now().toISOString() }))) break;
         failuresInARow = 0;
         io.log(`${green("sent")} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}`)}`);
-      } catch (err) {
-        const e = err as Error & { code?: string; responseCode?: number };
-        const rejected = e.code === "EENVELOPE" && (e.responseCode ?? 0) >= 500;
-        await store.record({ ...base, kind: rejected ? "BOUNCED" : "FAILED", error: `${e.code ?? ""} ${e.message}`.trim().slice(0, 1000), occurredAt: now().toISOString() });
+      } else {
+        const kind = classifySmtpFailure(failure);
         result.failed++;
         failuresInARow++;
-        io.log(`${red(rejected ? "rejected" : "failed")} ${r.prospect.label} <${r.address}>: ${e.message}`);
-        if (FATAL_CODES.has(e.code ?? "") || failuresInARow >= 3) {
-          result.aborted = FATAL_CODES.has(e.code ?? "") ? `the mailbox stopped accepting mail (${e.code})` : "three failures in a row";
+        const detail = `${failure.code ?? ""} ${failure.message}`.trim().slice(0, 1000);
+        if (!(await save({ ...base, kind: kind === "recipient" ? "BOUNCED" : "FAILED", error: detail, occurredAt: now().toISOString() }))) break;
+        io.log(`${red(kind === "recipient" ? "rejected" : "failed")} ${r.prospect.label} <${r.address}>: ${failure.message}`);
+        if (kind === "mailbox" || failuresInARow >= 3) {
+          result.aborted = kind === "mailbox" ? `the mailbox stopped accepting mail (${failure.code ?? failure.command ?? "error"}: ${failure.message.slice(0, 120)})` : "three failures in a row";
           io.log(red(`Stopping: ${result.aborted}.`));
           break;
         }

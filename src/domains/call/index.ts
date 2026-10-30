@@ -4,16 +4,17 @@ import type { Library, Message } from "../messages";
 import { buildVariables } from "../outreach";
 import type { Prospect } from "../prospects";
 import { renderTemplate } from "../render";
-import { filterValue, type TwentyClient } from "../twenty";
+import { filterAnd, filterValue, type TwentyClient } from "../twenty";
 import { scriptToPlainText, toDialerScript } from "./helpers";
 
 export * from "./helpers";
 
 /**
- * Write the account's call scripts into the dialer's agencyScripts, matched
- * by name: created when missing, updated when present. With a campaign name
- * they are attached to that dial campaign. The dialer then shows the script
- * and its objection answers next to every live call.
+ * Write the account's call scripts into the dialer's agencyScripts: created
+ * when missing, updated when present. A script is matched by its name and its
+ * campaign, so a campaign gets its own copy (--campaign) and the copy with no
+ * campaign is never moved onto one. The dialer then shows the script and its
+ * objection answers next to every live call.
  */
 export async function syncCallScripts(input: { client: TwentyClient; library: Library; account: Account; offer?: Offer; campaign?: string; dryRun: boolean; io: Io }): Promise<{ created: number; updated: number }> {
   const { client, library, account, io } = input;
@@ -37,7 +38,8 @@ export async function syncCallScripts(input: { client: TwentyClient; library: Li
 
     let existing;
     try {
-      existing = (await client.list("agencyScripts", { filter: `name[eq]:${filterValue(row.name)}`, limit: 1 }))[0];
+      const sameCampaign = campaignId ? `campaignIdId[eq]:${filterValue(campaignId)}` : "campaignIdId[is]:NULL";
+      existing = (await client.list("agencyScripts", { filter: filterAnd(`name[eq]:${filterValue(row.name)}`, sameCampaign), limit: 1 }))[0];
     } catch (err) {
       throw new Error(`Could not read agencyScripts: ${(err as Error).message}. Call scripts sync into the dialer (github.com/matthewdonsemail-lab/dialer); run its twenty:schema first, or use \`cold call sheet\` to print a script instead.`);
     }

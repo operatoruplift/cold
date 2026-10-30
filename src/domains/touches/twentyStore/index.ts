@@ -1,3 +1,5 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { filterAnd, filterIn, filterValue, readLiveSchema, type TwentyClient, type TwentyRecord } from "../../twenty";
 import type { ProspectLinks } from "../../prospects";
 import type { Touch, TouchStore } from "../types";
@@ -12,6 +14,19 @@ const RELATIONS = [
 ] as const;
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * A touch that could not be written to Twenty. It is kept in the journal and
+ * written before the next run plans anything, so a message that was sent can
+ * never look unsent (and go out twice).
+ */
+export class TouchNotSavedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TouchNotSavedError";
+  }
+}
 
 /** The record name shown in Twenty: "Sent email: founder-direct #1 to Dana Reyes (Clearview Tint)". */
 export function touchName(t: Touch): string {
@@ -32,14 +47,43 @@ export class TwentyStore implements TouchStore {
   private constructor(
     private readonly client: TwentyClient,
     private readonly fields: Set<string>,
+    private readonly journal: string,
+    private readonly retryDelayMs: number,
   ) {}
 
-  /** Checks coldTouch exists and learns which relations this workspace has. */
-  static async open(client: TwentyClient): Promise<TwentyStore> {
+  /**
+   * Checks coldTouch exists, learns which relations this workspace has, and
+   * first writes any touches an earlier run could not save (the journal).
+   */
+  static async open(client: TwentyClient, journal: string, options: { retryDelayMs?: number } = {}): Promise<TwentyStore> {
     const live = await readLiveSchema((query, variables) => client.metadata(query, variables));
     const touch = live.get("coldTouch");
     if (!touch) throw new Error("This Twenty workspace has no coldTouch object yet. Run: bun run twenty:schema");
-    return new TwentyStore(client, new Set(touch.fields.keys()));
+    const store = new TwentyStore(client, new Set(touch.fields.keys()), journal, options.retryDelayMs ?? 1000);
+    await store.replayJournal();
+    return store;
+  }
+
+  private async replayJournal(): Promise<void> {
+    if (!existsSync(this.journal)) return;
+    const pending = readFileSync(this.journal, "utf8")
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line) as Touch);
+    const left: Touch[] = [];
+    for (const touch of pending) {
+      try {
+        await this.client.create("coldTouches", this.toRecord(touch));
+      } catch {
+        left.push(touch);
+      }
+    }
+    if (left.length === 0) {
+      rmSync(this.journal);
+      return;
+    }
+    writeFileSync(this.journal, left.map((t) => JSON.stringify(t)).join("\n") + "\n");
+    throw new Error(`${left.length} touch${left.length === 1 ? "" : "es"} from an earlier run still could not be saved to Twenty (kept in ${this.journal}). Nothing is planned until they are, so nobody gets the same message twice. Check the connection and run again.`);
   }
 
   get where(): string {
@@ -83,8 +127,21 @@ export class TwentyStore implements TouchStore {
     };
   }
 
+  /** Write a touch, retrying twice. If Twenty still refuses, journal it and throw TouchNotSavedError. */
   async record(touch: Touch): Promise<void> {
-    await this.client.create("coldTouches", this.toRecord(touch));
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.client.create("coldTouches", this.toRecord(touch));
+        return;
+      } catch (err) {
+        lastError = err;
+        if (attempt < 2) await sleep(this.retryDelayMs * (attempt + 1));
+      }
+    }
+    mkdirSync(path.dirname(this.journal), { recursive: true });
+    appendFileSync(this.journal, `${JSON.stringify(touch)}\n`);
+    throw new TouchNotSavedError(`Twenty did not save the ${touch.kind} touch for ${touch.prospectLabel ?? touch.prospectKey} (${(lastError as Error)?.message ?? lastError}). It is kept in ${this.journal} and saved before the next run plans anything.`);
   }
 
   /** Touches keyed to any of these identities, or sent to one of their email addresses. */

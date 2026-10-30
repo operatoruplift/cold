@@ -18,7 +18,9 @@ the stakes are high.
 - **Honours it at once, everywhere.** `cold email sync` logs an opt-out the
   next time it reads the inbox, and from then on that person is skipped on
   every channel, by every account. When they came from the dialer, they are set
-  to Do Not Contact there too, so they are not called either.
+  to Do Not Contact there too, so they are not called either. An unsubscribe
+  from an address you never emailed (a forward or an alias) suppresses that
+  address and is flagged, so you can find who it forwards for.
 - **Keeps subjects honest.** Lint rejects a subject that pretends to be a
   reply or a forward. Only real follow-ups in a thread start with "Re:".
 - **Stops on bounces and invalid addresses**, and never automates DMs.

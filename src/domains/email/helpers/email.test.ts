@@ -96,3 +96,51 @@ test("headerText flattens structured header values", async () => {
   expect(headerText({ text: "Dana <dana@x.example>", value: [{ address: "dana@x.example" }] })).toBe("Dana <dana@x.example>");
   expect(headerText("auto-replied")).toBe("auto-replied");
 });
+
+describe("review fixes: inbound", () => {
+  const reply = (text: string, subject = "Re: quick question") => classifyInbound({ from: "dana@x.example", subject, text, headers: {} });
+
+  test('"Stop by the shop" is a reply, not an opt-out', () => {
+    expect(reply("Stop by the shop Tuesday and we can talk.").kind).toBe("REPLIED");
+    expect(reply("Please stop.").kind).toBe("OPTED_OUT");
+    expect(reply("stop emailing me").kind).toBe("OPTED_OUT");
+  });
+
+  test("a stop written below the quoted email still counts", () => {
+    expect(reply("On Mon, Alex wrote:\n> Hi Dana,\n> Not for you? Reply \"stop\"\n\nSTOP").kind).toBe("OPTED_OUT");
+    expect(reply("On Mon, Alex wrote:\n> Hi Dana,\n> Reply \"unsubscribe\" and we'll take you off\n\nSure, Tuesday works.").kind).toBe("REPLIED");
+  });
+
+  test("a delivery delay is not a bounce", () => {
+    const delay = classifyInbound({
+      from: "mailer-daemon@googlemail.com",
+      subject: "Delivery Status Notification (Delay)",
+      text: "Message not delivered yet. Gmail will retry for 46 more hours.\n\nFinal-Recipient: rfc822; dana@x.example\nAction: delayed\nStatus: 4.4.7",
+      headers: { "content-type": "multipart/report; report-type=delivery-status" },
+    });
+    expect(delay.kind).toBe("DELAYED");
+    expect(classifyInbound({ from: "postmaster@x.example", subject: "Delivery Status Notification (Delay)", text: "Still trying.", headers: {} }).kind).toBe("DELAYED");
+  });
+
+  test("a report with one failed and one delayed recipient bounces only the failed one", () => {
+    const verdict = classifyInbound({
+      from: "mailer-daemon@x.example",
+      subject: "Undelivered Mail Returned to Sender",
+      text: "Final-Recipient: rfc822; a@x.example\nAction: failed\nStatus: 5.1.1\n\nFinal-Recipient: rfc822; b@x.example\nAction: delayed\nStatus: 4.4.1",
+      headers: {},
+    });
+    expect(verdict).toMatchObject({ kind: "BOUNCED", failedAddresses: ["a@x.example"] });
+  });
+});
+
+describe("classifySmtpFailure", () => {
+  test("only a permanent RCPT TO refusal is the recipient's bounce", async () => {
+    const { classifySmtpFailure } = await import("./smtpFailure");
+    expect(classifySmtpFailure({ code: "EENVELOPE", responseCode: 550, command: "RCPT TO" })).toBe("recipient");
+    expect(classifySmtpFailure({ code: "EENVELOPE", responseCode: 550, command: "MAIL FROM" })).toBe("mailbox");
+    expect(classifySmtpFailure({ code: "EMESSAGE", responseCode: 554, command: "DATA" })).toBe("mailbox");
+    expect(classifySmtpFailure({ code: "EAUTH", command: "AUTH PLAIN" })).toBe("mailbox");
+    expect(classifySmtpFailure({ code: "EENVELOPE", responseCode: 450, command: "RCPT TO" })).toBe("temporary");
+    expect(classifySmtpFailure({ code: "EENVELOPE", command: "API" })).toBe("other");
+  });
+});

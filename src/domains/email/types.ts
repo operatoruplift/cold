@@ -11,8 +11,8 @@ export interface EmailDraft {
   headers: Record<string, string>;
 }
 
-/** What an inbound email means for the sequence. */
-export type InboundKind = "REPLIED" | "OPTED_OUT" | "BOUNCED" | "AUTO_REPLY";
+/** What an inbound email means for the sequence. AUTO_REPLY and DELAYED change nothing. */
+export type InboundKind = "REPLIED" | "OPTED_OUT" | "BOUNCED" | "AUTO_REPLY" | "DELAYED";
 
 export interface InboundEmail {
   from?: string;

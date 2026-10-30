@@ -33,14 +33,20 @@ the brand or a rep.
   what you do, the proof) are written once per offer and checked to read
   naturally in every sentence that uses them.
 - **It stops when it should.** A reply, a bounce or an opt-out ends the
-  sequence. An opt-out on any channel stops every channel. Someone who replied
-  in the last 90 days is never started on anything new. A dialer prospect
-  marked Do Not Contact is never emailed or messaged, and an email unsubscribe
-  marks them Do Not Contact in the dialer too.
+  sequence, and a reply on any channel stops everything automatic for 90 days:
+  a reply is a conversation, yours to carry on. An opt-out on any channel stops
+  every channel. A dialer prospect marked Do Not Contact is never emailed or
+  messaged, and an email unsubscribe marks them Do Not Contact in the dialer
+  too. Out-of-office replies and delivery delays change nothing.
 - **Email that lands.** Plain text from your own mailbox with no tracking
-  pixel. Follow-ups reply in the same thread and quote it. There is a daily
-  cap, a sending window in your timezone and a random gap between sends. Every
-  email carries a postal address and an opt-out, with `List-Unsubscribe` set.
+  pixel. Follow-ups reply in the same thread and quote it, and fall due on
+  calendar days in your timezone. There is a daily cap, a sending window checked
+  before every email, and a random gap between sends. Every email carries a
+  postal address and an opt-out, with `List-Unsubscribe` set.
+- **Never the same email twice.** One address gets one message per run, even
+  when two prospects share it. If a sent email cannot be logged, the run stops
+  and the touch is kept locally, then saved to Twenty before the next run plans
+  anything.
 - **DMs that keep your account.** LinkedIn, X and Instagram restrict accounts
   that send DMs from scripts, so `cold` never does. It writes the next DM due,
   copies it, opens the profile, and logs what happened when you say. It keeps
@@ -180,9 +186,10 @@ flowchart TB
 Run both against one Twenty workspace and they share everything:
 
 - **Call scripts.** `cold call sync` writes every call script for an account
-  into `agencyScripts` in the dialer's own format (`content`,
-  `category`, `objection_responses`), matched by name, optionally attached to
-  a dial campaign. Prospect details stay as `{{first_name}}` and
+  into `agencyScripts` in the dialer's own format (`content`, `category`,
+  `objection_responses`), named with its voice ("Voicemail (personal)",
+  "Voicemail (company)"). Scripts are matched per dial campaign, so
+  `--campaign` gets its own copy. Prospect details stay as `{{first_name}}` and
   `{{company}}` for the rep to read off the contact.
 - **Do Not Contact, both ways.** A prospect set to Do Not Contact in the dialer
   (or opted out of SMS) is never emailed or messaged. An email opt-out sets
@@ -278,10 +285,17 @@ records go to `.cold/touches.jsonl`.
 - Subjects never start with "Re:" or "Fwd:" unless the email really is a reply.
 - No emojis, and no `[placeholder]` in anything written.
 - One sequence per channel per prospect at a time, with 30 days between them.
-- Nobody who replied in the last 90 days is started on anything new.
+- Nobody who replied anywhere in the last 90 days is sent anything automatic.
+- One address gets one message per run.
 - Daily caps per mailbox and per DM platform, and a sending window in your
-  timezone.
-- The example config can preview but never send.
+  timezone, checked before every email.
+- Only a recipient's server refusing the address counts as a bounce. A refused
+  sender (a sending limit, bad credentials) stops the run instead, and a
+  delivery delay is ignored.
+- A send that cannot be logged stops the run, and is saved before the next one
+  plans anything.
+- The example config can preview but never send, or write scripts into the
+  dialer.
 
 The legal side (CAN-SPAM, GDPR and PECR, CASL, calling rules, platform terms) is
 in [docs/compliance.md](docs/compliance.md). How to run the sequences well

@@ -74,7 +74,8 @@ export async function runDm(input: DmRunInput): Promise<DmRunResult> {
   const channel = platformChannel(platform);
 
   const [history, suppressions] = await Promise.all([store.forProspects(input.prospects.flatMap((p) => p.identities)), store.suppressions()]);
-  const plan = planSequence({ sequence, channel, prospects: input.prospects, history, suppressions, now: now(), reachable: (p) => dmTarget(platform, p) });
+  const timeZone = account.email?.window?.timezone;
+  const plan = planSequence({ sequence, channel, prospects: input.prospects, history, suppressions, now: now(), reachable: (p) => dmTarget(platform, p), timeZone });
 
   const held: string[] = [];
   const queue = plan.due.flatMap((item) => {
@@ -92,7 +93,7 @@ export async function runDm(input: DmRunInput): Promise<DmRunResult> {
   });
 
   const cap = account.dm.dailyCaps[platform] ?? 20;
-  const sentToday = (await store.since(startOfDay(now()), { account: account.key, channel, kind: "SENT" })).length;
+  const sentToday = (await store.since(startOfDay(now(), timeZone), { account: account.key, channel, kind: "SENT" })).length;
   const batch = queue.slice(0, Math.min(Math.max(0, cap - sentToday), options.limit ?? Number.POSITIVE_INFINITY));
 
   io.log(`${bold(sequence.id)} ${dim(`(${PLATFORM_NAMES[platform]}, account ${account.key})`)}`);
@@ -147,7 +148,13 @@ export async function runDm(input: DmRunInput): Promise<DmRunResult> {
       occurredAt: now().toISOString(),
       links: item.prospect.links,
     };
-    await store.record(touch);
+    try {
+      await store.record(touch);
+    } catch (err) {
+      io.log(red(`  Could not log it: ${(err as Error).message}`));
+      io.log(red("  Stopping here so nothing is sent twice."));
+      break;
+    }
     if (answer === "s") {
       result.sent++;
       io.log(green("  logged as sent"));

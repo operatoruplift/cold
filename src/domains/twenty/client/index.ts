@@ -4,8 +4,9 @@
  * Twenty allows an API key 100 requests a minute and caps a page at 200
  * records, so every request waits for a slot in a sliding one-minute window
  * (TWENTY_REQUESTS_PER_MINUTE, default 90) and is retried on 429, and every
- * list is a keyset walk over id (orderBy=id[AscNullsFirst], filter=id[gt]:last)
- * the same way the dialer does it: it works on builds that ignore cursors.
+ * list is a keyset walk over id (order_by=id[AscNullsFirst], filter=id[gt]:last):
+ * it works on builds that ignore cursors. The REST sort parameter is
+ * order_by; Twenty ignores orderBy.
  */
 
 export interface TwentyConfig {
@@ -140,7 +141,7 @@ export class TwentyClient {
     let lastId: string | undefined;
     for (let page = 0; page < 1000 && out.length < limit; page++) {
       const size = Math.min(PAGE, limit - out.length);
-      const params = new URLSearchParams({ limit: String(size), orderBy: "id[AscNullsFirst]", depth: "0" });
+      const params = new URLSearchParams({ limit: String(size), order_by: "id[AscNullsFirst]", depth: "0" });
       const filter = filterAnd(options.filter, lastId ? `id[gt]:${filterValue(lastId)}` : undefined);
       if (filter) params.set("filter", filter);
       const rows = unwrapList(await this.request("GET", `/rest/${plural}?${params}`), plural);
