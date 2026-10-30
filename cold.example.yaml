@@ -1,0 +1,99 @@
+# cold.yaml - who sends, and what you offer. Copy this file to cold.yaml.
+# Secrets (mailbox passwords, the Twenty key) go in .env.local, never here.
+#
+# Every key under an account or an offer that matches a message variable
+# (sender_name, booking_url, audience, proof, ...) is filled into the
+# messages. Run `bun run cold variables` for the full list.
+
+accounts:
+  # Personal: messages go out under your own name, from your own mailbox and
+  # profiles, written as "I". Founder-led outreach.
+  personal:
+    voice: personal
+    sender_first_name: Alex
+    sender_name: Alex Morgan
+    sender_title: Founder
+    sender_company: Brightside Studio
+    sender_phone: "+1 512 555 0142"
+    booking_url: https://cal.com/alex-example/15min
+    postal_address: 123 Example St, Austin, TX 78701
+    email:
+      from: Alex Morgan <alex@brightside.example>
+      smtp_url_env: SMTP_URL_PERSONAL
+      imap_url_env: IMAP_URL_PERSONAL
+      # A personal mailbox on a warmed-up domain: start at 15-20 and build up.
+      daily_cap: 30
+      min_delay_seconds: 60
+      max_delay_seconds: 180
+      window:
+        days: [mon, tue, wed, thu]
+        start: "08:00"
+        end: "17:00"
+        timezone: America/Chicago
+    dm:
+      # The most this account sends per platform per day, all sequences.
+      daily_caps:
+        linkedin: 20
+        x: 30
+        instagram: 20
+
+  # Company: messages go out from the brand or from a rep on its behalf,
+  # written as "we", with a full signature.
+  company:
+    voice: company
+    sender_first_name: Jordan
+    sender_name: Jordan Lee
+    sender_title: Partnerships
+    sender_company: Brightside Studio
+    sender_phone: "+1 512 555 0143"
+    booking_url: https://cal.com/brightside-example/intro
+    postal_address: 123 Example St, Austin, TX 78701
+    email:
+      from: Jordan at Brightside <jordan@brightside.example>
+      smtp_url_env: SMTP_URL_COMPANY
+      imap_url_env: IMAP_URL_COMPANY
+      daily_cap: 40
+      min_delay_seconds: 60
+      max_delay_seconds: 180
+      window:
+        days: [mon, tue, wed, thu, fri]
+        start: "08:30"
+        end: "16:30"
+        timezone: America/Chicago
+      # Optional: an https endpoint that unsubscribes on POST (RFC 8058).
+      # Without it, unsubscribe works by email reply, which `cold email sync`
+      # picks up.
+      # unsubscribe_url: https://brightside.example/unsubscribe?email={{email}}
+    dm:
+      daily_caps:
+        x: 40
+        instagram: 30
+        linkedin: 20
+
+# What you are offering, written once and reused by every message.
+# Each line has to read naturally inside the sentences shown.
+offers:
+  booking-pages:
+    # "I work with {{audience}}"
+    audience: auto service shops
+    # "I {{offer}}." / "We {{offer}}."
+    offer: build booking pages that turn Google reviews into appointments
+    # "so you get {{outcome}}" / "If getting {{outcome}} becomes a priority"
+    outcome: more booked jobs from existing Google reviews
+    # "Most {{audience}} I talk to {{pain}}."
+    pain: miss calls after hours and lose the job to whoever answers
+    # One true sentence. Never invent a result.
+    proof: A tint shop in Dallas booked 14 extra jobs from its page in the first month.
+
+  social-listening:
+    audience: B2B SaaS founders
+    offer: find buyers who are asking for a tool like yours on Reddit and X
+    outcome: warm conversations with buyers who are already shopping
+    pain: spend hours in Reddit threads looking for leads and still miss the good ones
+    proof: One founder booked nine demos from it in two weeks.
+
+default_offer: booking-pages
+
+# Where touches are logged: auto (Twenty when TWENTY_BASE_URL and
+# TWENTY_API_KEY are set, otherwise .cold/touches.jsonl), twenty, or file.
+store: auto

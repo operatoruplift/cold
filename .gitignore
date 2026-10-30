@@ -1,0 +1,19 @@
+node_modules/
+
+# Your sender details and offers. Copy cold.example.yaml to start.
+cold.yaml
+
+# Secrets (SMTP/IMAP URLs, Twenty key). Copy .env.example to start.
+.env
+.env.local
+.env.*.local
+
+# The local touch log, used when Twenty is not configured.
+.cold/
+
+# Your own prospect lists.
+prospects*.csv
+!examples/prospects.csv
+
+.DS_Store
+*.log

@@ -1,0 +1,59 @@
+# Objection handling shared by every call script. `cold call sync` writes it
+# into the dialer's objection_responses, in the voice of the account you sync
+# (personal or company). Square brackets are yours to fill in live; never read
+# them out. Variables work here the same way they do in the scripts.
+
+- objection: Not interested
+  category: brush_off
+  personal: Totally fair, most people aren't when I call out of the blue. Before I go, can I ask one thing? How are you handling [the problem] today?
+  company: Understood, thanks for being straight with me. Is that because you have this covered, or because the timing is off?
+
+- objection: Just send me an email
+  category: brush_off
+  personal: Happy to. So I send you something useful and not a brochure, what would you want it to cover?
+  company: Happy to. So it's relevant to {{company}}, what should it cover? And is this the best address for it?
+
+- objection: We already have someone for that
+  category: incumbent
+  personal: Makes sense. What do you like most about how they do it? (Listen.) A lot of the {{audience}} I work with kept who they had and used me for [the gap].
+  company: Good to hear. What would you change about it if you could? (Listen.) Most of our customers came from an existing provider, so we are used to fitting around what already works.
+
+- objection: We don't have the budget
+  category: budget
+  personal: Understood. If it paid for itself in the first month, would it be worth a look? If not, I'll leave you be.
+  company: That's fair. Would it help to see what it costs next to what it brings in? If the numbers don't work, we'll say so.
+
+- objection: How much does it cost?
+  category: price
+  personal: It depends on [scope]. Most {{audience}} I work with land around [range]. Can I ask two quick questions so I give you a real number?
+  company: It depends on [scope], usually around [range] for a business like {{company}}. Can I ask two quick questions so we quote you properly?
+
+- objection: How did you get my number?
+  category: trust
+  personal: From [the source, such as your website or your Google listing]. If you'd rather I didn't call, say so and I'll take you off my list right now.
+  company: From [the source, such as your website or your Google listing]. If you'd rather we didn't call, I'll take you off our list right now.
+
+- objection: I'm busy right now
+  category: timing
+  personal: No problem. Is later today or tomorrow morning better? I'll keep it to five minutes.
+  company: Of course. When is a better time today or tomorrow? I'll put it in the calendar and keep it short.
+
+- objection: We tried something like this and it didn't work
+  category: history
+  personal: Sorry to hear that. What happened? (Listen.) That's useful. The difference with what I do is [the difference]. Want to see it side by side?
+  company: That's worth knowing. What went wrong? (Listen.) Here's what we do differently, [the difference]. Would it help to see it with your numbers?
+
+- objection: I'm not the right person
+  category: routing
+  personal: Thanks for telling me. Who should I speak to, and what's the best way to reach them?
+  company: Thanks. Who looks after this at {{company}}? Is there a direct line or an email I can use?
+
+- objection: Is this a sales call?
+  category: trust
+  personal: It is, and I'll be quick. I {{offer}}. If it's not relevant for {{company}}, tell me and I'll let you go.
+  company: It is, and I'll keep it short. We {{offer}}. If it isn't relevant for {{company}}, I'll let you go.
+
+- objection: Take me off your list
+  category: opt_out
+  personal: Done, you won't hear from me again. Sorry for the interruption. (Set the disposition to Do Not Contact.)
+  company: Done, I'll remove you now and you won't hear from us again. Sorry for the interruption. (Set the disposition to Do Not Contact.)

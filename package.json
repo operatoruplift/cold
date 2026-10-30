@@ -1,0 +1,58 @@
+{
+  "name": "cold",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cold call scripts, cold DMs and cold emails for personal and company accounts: open source, with every touch kept in Twenty CRM.",
+  "author": "Matthew (https://github.com/matthewdonsemail-lab)",
+  "license": "MIT",
+  "homepage": "https://github.com/matthewdonsemail-lab/cold#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/matthewdonsemail-lab/cold.git"
+  },
+  "bugs": {
+    "url": "https://github.com/matthewdonsemail-lab/cold/issues"
+  },
+  "keywords": [
+    "cold-email",
+    "cold-calling",
+    "cold-dm",
+    "outreach",
+    "sales-scripts",
+    "crm",
+    "twenty",
+    "twenty-crm",
+    "nodemailer",
+    "open-source"
+  ],
+  "bin": {
+    "cold": "src/cli.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "cold": "bun src/cli.ts",
+    "lint:messages": "bun src/cli.ts lint",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test && bun run lint:messages",
+    "twenty:schema": "bun src/cli.ts twenty:schema",
+    "twenty:schema:check": "bun src/cli.ts twenty:schema --dry-run"
+  },
+  "dependencies": {
+    "imapflow": "2.5.2",
+    "mailparser": "3.9.40",
+    "nodemailer": "10.1.2",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.3",
+    "@types/mailparser": "3.9.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/smtp-server": "3.5.13",
+    "smtp-server": "3.19.23",
+    "typescript": "7.0.2"
+  }
+}
