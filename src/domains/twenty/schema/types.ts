@@ -1,3 +1,6 @@
+// Adapted from dialer, backend/src/lib/twenty/schema/types.ts
+// (https://github.com/matthewdonsemail-lab/dialer), MIT License,
+// Copyright (c) 2026 Cold Dialer Contributors. See THIRD_PARTY_NOTICES.md.
 /** Twenty field types the cold schema uses (FieldMetadataType). */
 export type SchemaFieldType = "TEXT" | "NUMBER" | "BOOLEAN" | "DATE_TIME" | "SELECT";
 

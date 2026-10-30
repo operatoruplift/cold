@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "description": "Cold call scripts, cold DMs and cold emails for personal and company accounts: open source, with every touch kept in Twenty CRM.",
-  "author": "Matthew (https://github.com/matthewdonsemail-lab)",
+  "author": "Operator Uplift (https://github.com/operatoruplift)",
   "license": "MIT",
-  "homepage": "https://github.com/matthewdonsemail-lab/cold#readme",
+  "homepage": "https://github.com/operatoruplift/cold#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/matthewdonsemail-lab/cold.git"
+    "url": "https://github.com/operatoruplift/cold.git"
   },
   "bugs": {
-    "url": "https://github.com/matthewdonsemail-lab/cold/issues"
+    "url": "https://github.com/operatoruplift/cold/issues"
   },
   "keywords": [
     "cold-email",

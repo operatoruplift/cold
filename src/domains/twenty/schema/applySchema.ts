@@ -1,3 +1,6 @@
+// Adapted from dialer, backend/src/lib/twenty/schema/applySchema.ts
+// (https://github.com/matthewdonsemail-lab/dialer), MIT License,
+// Copyright (c) 2026 Cold Dialer Contributors. See THIRD_PARTY_NOTICES.md.
 import { SCHEMA_MANIFEST } from "./manifest";
 import type { ApplyItem, ApplyReport, MetadataRequest, SchemaField, SchemaManifest, SchemaRelation } from "./types";
 

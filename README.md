@@ -4,10 +4,11 @@
 accounts: open source, written to be sent, with every touch kept in
 [Twenty CRM](https://twenty.com).**
 
-Built by [Matthew](https://github.com/matthewdonsemail-lab)
-([@matthewsoldit on X](https://x.com/matthewsoldit)). It is the messaging half
-of [dialer](https://github.com/matthewdonsemail-lab/dialer): the same Twenty
-workspace, the same prospects, the same Do Not Contact list.
+Built by [Operator Uplift](https://github.com/operatoruplift). It works with
+any Twenty workspace on its own, and alongside
+[dialer](https://github.com/matthewdonsemail-lab/dialer), the open-source power
+dialer on Twenty: run both on one workspace and they share the prospects, the
+call scripts and the Do Not Contact list.
 
 [![License: MIT](https://img.shields.io/badge/LICENSE-MIT-yellow.svg)](LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-000000.svg)](https://bun.sh)
@@ -86,7 +87,7 @@ You need [Bun](https://bun.sh). Twenty is optional: without it the touch log is
 a local file.
 
 ```bash
-git clone https://github.com/matthewdonsemail-lab/cold.git && cd cold
+git clone https://github.com/operatoruplift/cold.git && cd cold
 bun install
 cp cold.example.yaml cold.yaml && cp .env.example .env.local   # who sends, the offer, mailbox URLs, Twenty key
 bun run twenty:schema                                           # optional: the coldTouch object in Twenty
@@ -181,9 +182,11 @@ flowchart TB
     class stop skip
 ```
 
-## Works with the dialer
+## Works with dialer
 
-Run both against one Twenty workspace and they share everything:
+[dialer](https://github.com/matthewdonsemail-lab/dialer) is a separate open-source
+power dialer on Twenty (MIT). `cold` needs none of it, but run both against
+one Twenty workspace and they share everything:
 
 - **Call scripts.** `cold call sync` writes every call script for an account
   into `agencyScripts` in the dialer's own format (`content`, `category`,
@@ -334,9 +337,10 @@ docs/                     playbook and compliance
 examples/prospects.csv    five fictional prospects
 ```
 
-The code follows the dialer's layout: camelCase `domains/<domain>/<primitive>`,
+The code follows dialer's layout: camelCase `domains/<domain>/<primitive>`,
 pure helpers under `helpers/`, input and output in `index.ts`, tests next to
-the code.
+the code. The Twenty schema setup is adapted from dialer's (MIT); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Checks
 
@@ -348,4 +352,5 @@ bun run lint:messages
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+for the code adapted from dialer.

@@ -34,7 +34,7 @@ export function lintMessage(message: Message): LintIssue[] {
     if (parsed.errors.length === 0) rendered[label] = renderNodes(parsed.nodes, examples, { mode: "strict", seed: message.id }).text;
   }
 
-  if (EMOJI.test(message.body) || (message.subject && EMOJI.test(message.subject))) error("no-emoji", "no emojis: they read as automated and break the brand rule");
+  if (EMOJI.test(message.body) || (message.subject && EMOJI.test(message.subject))) error("no-emoji", "no emojis: in a cold message they read as automated");
 
   const body = rendered.body ?? "";
   if (message.channel === "email") {

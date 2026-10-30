@@ -3,7 +3,7 @@
 ## Getting started
 
 ```bash
-git clone https://github.com/matthewdonsemail-lab/cold.git
+git clone https://github.com/operatoruplift/cold.git
 cd cold
 bun install
 bun run check          # typecheck + tests + message lint
@@ -26,7 +26,8 @@ no emojis, nothing invented. `proof` lines must be true.
 
 ## Code
 
-The layout follows [dialer](https://github.com/matthewdonsemail-lab/dialer):
+The layout follows [dialer](https://github.com/matthewdonsemail-lab/dialer), the
+open-source power dialer on Twenty that `cold` works alongside:
 
 ```
 src/domains/<domain>/
