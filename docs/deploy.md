@@ -10,7 +10,7 @@ and any VPS works the same way.
 | Setting | Value |
 |---|---|
 | Build | the `Dockerfile` in this repository |
-| Volume | mounted at `/data` (1 GB is plenty). It holds `cold.yaml`, `.env.local`, the database (waitlist, login, AI drafts), prospect lists and your copy of the message library. |
+| Volume | mounted at `/data` (500 MB is plenty). It holds `cold.yaml`, `.env.local`, the database (waitlist, login, AI drafts), prospect lists and your copy of the message library. |
 | `COLD_PUBLIC_URL` | the address people open, e.g. `https://cold.example.com`. Railway, Render and Fly set it for you from their own domain; set it yourself for a custom domain. |
 | `COLD_ALLOWED_HOSTS` | optional: other host names that reach the same server, comma separated. Railway's, Render's and Fly's own domains are added for you. |
 | `COLD_PROXY_HOPS` | how many proxies sit in front: 1 (default) for the host's own, 2 with a front door such as Vercel |
@@ -20,6 +20,10 @@ and any VPS works the same way.
 
 Only one instance should run: the login rate limits and running sends live in
 the server's memory, and the database is a file on the volume.
+
+It is small: the Dockerfile bundles the site and the app when the image is
+built (`bun run build`), the mail and AI libraries load the first time they're
+used, and an idle server holds about 40 MB of memory.
 
 ## First start
 
@@ -45,6 +49,8 @@ reset a forgotten password on the server, open its shell and run
 
 The repository carries a `railway.json`: Railway builds the `Dockerfile`,
 checks `/api/health` before switching traffic, and restarts COLD if it stops.
+COLD fits in Railway's free plan, whose monthly credit covers a server this
+size running all the time.
 
 1. [railway.com](https://railway.com), New Project, Deploy from GitHub repo,
    pick `operatoruplift/cold` (let Railway's GitHub app see it if asked).
@@ -52,14 +58,17 @@ checks `/api/health` before switching traffic, and restarts COLD if it stops.
    fix it.
 2. In the service, Settings, Networking, Generate Domain (target port 4100 if
    it asks). You get an address like `cold-production.up.railway.app`, which
-   COLD picks up as `RAILWAY_PUBLIC_DOMAIN`.
+   COLD picks up as `RAILWAY_PUBLIC_DOMAIN`; you can edit the name before the
+   `.up.railway.app`.
 3. Attach a volume to the service, mounted at `/data`.
 4. Variables (optional now, or later in COLD's Settings): `ANTHROPIC_API_KEY`
    and your `SMTP_URL_*`, `IMAP_URL_*`, `TWENTY_*`. Behind a front door such as
    Vercel (next section), also `COLD_PUBLIC_URL` and `COLD_PROXY_HOPS=2`.
 5. Deploy. The deploy logs print the setup link for your login.
 
-Every push to `main` redeploys; `/data` stays.
+Leave Serverless (Railway's app sleeping) off: the first request to a sleeping
+server can get a 502 while it wakes, and a send would stop halfway. Every push
+to `main` redeploys; `/data` stays.
 
 ## A front door on Vercel
 

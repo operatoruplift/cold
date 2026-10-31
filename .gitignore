@@ -11,6 +11,9 @@ cold.yaml
 # The local touch log, used when Twenty is not configured.
 .cold/
 
+# The bundled site and app (bun run build).
+dist/
+
 # Your own prospect lists.
 prospects*.csv
 !examples/prospects.csv

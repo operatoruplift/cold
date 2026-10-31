@@ -2,8 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { AddressInfo } from "node:net";
 import nodemailer from "nodemailer";
 import { SMTPServer } from "smtp-server";
+import type { Account } from "../config";
 import type { Touch } from "../touches";
 import { buildEmail, classifyInbound, classifySmtpFailure } from "./helpers";
+import { smtpTransport } from "./send";
 import { parseMailboxMessage } from "./sync";
 
 /**
@@ -94,9 +96,17 @@ describe("SMTP round trip", () => {
       messageId: "<second-2@brightside.example>",
       unsubscribeUrl: "https://brightside.example/u?e=dana%40clearviewtint.example",
     });
-    const transport = nodemailer.createTransport(`smtp://127.0.0.1:${port}`);
-    await transport.sendMail(draft);
-    transport.close();
+    // The same transport a send uses, built from the account's SMTP URL.
+    process.env.SMTP_URL_WIRE_TEST = `smtp://127.0.0.1:${port}`;
+    const account = { key: "personal", voice: "personal", variables: {}, dm: { dailyCaps: {} }, email: { smtpUrlEnv: "SMTP_URL_WIRE_TEST" } } as unknown as Account;
+    const transport = smtpTransport(account);
+    try {
+      await transport.verify();
+      await transport.sendMail(draft);
+    } finally {
+      transport.close?.();
+      delete process.env.SMTP_URL_WIRE_TEST;
+    }
 
     const raw = received.at(-1)!;
     const parsed = await parseMailboxMessage(raw);

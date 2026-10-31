@@ -7,6 +7,8 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 COPY . .
+# Bundle the site and the app now, not every time the server starts.
+RUN bun run build
 ENV NODE_ENV=production \
     COLD_HOME=/data \
     COLD_REQUIRE_PUBLIC_URL=1 \

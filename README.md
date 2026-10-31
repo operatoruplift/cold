@@ -260,11 +260,12 @@ while a send is going; the send stops if COLD is closed.
 ### Host it
 
 To reach COLD from your phone, share the site and collect a waitlist, run it on
-a server with HTTPS: Railway (the repository carries its `railway.json`),
-Render, Fly or any VPS. One container, one volume for your files. Set
-`COLD_PUBLIC_URL` (Railway, Render and Fly fill it in for you), deploy, and open
-the setup link it prints in the logs. A Vercel address can stand in front as
-the public URL. Step by step: [docs/deploy.md](docs/deploy.md).
+a server with HTTPS: Railway (the repository carries its `railway.json`, and
+COLD fits in Railway's free plan), Render, Fly or any VPS. One container, one
+volume for your files. Set `COLD_PUBLIC_URL` (Railway, Render and Fly fill it in
+for you), deploy, and open the setup link it prints in the logs. A Vercel
+address can stand in front as the public URL. Step by step:
+[docs/deploy.md](docs/deploy.md).
 
 ### From the terminal
 
@@ -453,6 +454,7 @@ records go to `.cold/touches.jsonl`.
 | `bun run ui` | The site and the app on your computer: http://localhost:4100 and /app/ (`--no-open` to not open a browser) |
 | `bun run desktop` | The same, with the app in its own window |
 | `bun run start` | The server without opening anything (what a host runs) |
+| `bun run build` | Bundle the site and the app into `dist/`, which a server with `NODE_ENV=production` serves instead of bundling at start (the Dockerfile runs it) |
 | `bun run dev` | Restart on every change, for working on COLD itself |
 | `cold owner` | Create or reset your login (`cold owner hash` prints a hash for `COLD_OWNER_PASSWORD_HASH`) |
 | `cold list` | Every sequence and script, with when to use it |

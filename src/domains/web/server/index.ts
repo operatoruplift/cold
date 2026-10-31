@@ -21,7 +21,7 @@ import { Waitlist } from "../../waitlist";
 import { aiRoutes } from "../ai";
 import { createApi } from "../api";
 import { WebContext } from "../context";
-import { buildAssets } from "./assets";
+import { buildAssets, bundle, DIST, readBundle } from "./assets";
 import { clientAddress, createHandler, SetupCode } from "./handler";
 import { serverSettings } from "./settings";
 
@@ -39,7 +39,10 @@ const db = openDatabase(path.join(ROOT, ".cold", "cold.db"));
 const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
 const waitlist = new Waitlist(db);
 const ctx = new WebContext({ root: ROOT, messagesDir: MESSAGES_DIR, db });
-const assets = await buildAssets({ appRoot: APP_ROOT, publicUrl: settings.publicUrl });
+// In production the site and the app come ready from `bun run build` (the Dockerfile runs it), so the
+// server starts faster and smaller. Otherwise they're bundled now, so `bun run ui` shows your latest changes.
+const bundled = (process.env.NODE_ENV === "production" && readBundle(path.join(APP_ROOT, DIST))) || (await bundle(APP_ROOT));
+const assets = buildAssets(bundled, { appRoot: APP_ROOT, publicUrl: settings.publicUrl });
 const appUrl = new URL("/app/", settings.publicUrl).href;
 const setup = new SetupCode((code) => {
   console.log(`\nFirst run: create your login at ${appUrl}?setup=${code}`);

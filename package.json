@@ -38,6 +38,7 @@
     "start": "bun src/domains/web/server/index.ts --no-open",
     "dev": "bun --watch src/domains/web/server/index.ts --no-open",
     "desktop": "bun src/domains/web/server/index.ts --window",
+    "build": "bun src/domains/web/server/build.ts",
     "lint:messages": "bun src/cli.ts lint",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

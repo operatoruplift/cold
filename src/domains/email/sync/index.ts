@@ -1,5 +1,3 @@
-import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
 import type { Account } from "../../config";
 import { dim, green, red, yellow, type Io } from "../../cli/io";
 import type { Touch, TouchStore } from "../../touches";
@@ -34,6 +32,7 @@ export interface SyncResult {
 
 /** A raw RFC 822 message as the sync reads it. */
 export async function parseMailboxMessage(source: Buffer | string): Promise<MailboxMessage> {
+  const { simpleParser } = await import("mailparser");
   const parsed = await simpleParser(source);
   const headers: Record<string, string> = {};
   for (const [key, value] of parsed.headers) headers[key.toLowerCase()] = headerText(value);
@@ -70,9 +69,15 @@ function imapOptions(account: Account) {
   };
 }
 
+/** imapflow and mailparser load when a mailbox is first read, so a server that isn't reading mail stays small. */
+async function imapClient(options: ReturnType<typeof imapOptions>) {
+  const { ImapFlow } = await import("imapflow");
+  return new ImapFlow(options);
+}
+
 /** Log in to the account's mailbox and out again: a connection check. */
 export async function testImap(account: Account): Promise<void> {
-  const client = new ImapFlow(imapOptions(account));
+  const client = await imapClient(imapOptions(account));
   await client.connect();
   await client.logout().catch(() => {});
 }
@@ -83,7 +88,7 @@ export function imapReader(account: Account): MailboxReader {
 
   return {
     async read(since, wanted) {
-      const client = new ImapFlow(options);
+      const client = await imapClient(options);
       await client.connect();
       const lock = await client.getMailboxLock("INBOX");
       const out: MailboxMessage[] = [];

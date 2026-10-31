@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 export interface StaticFile {
@@ -15,6 +15,17 @@ export interface BuiltAssets {
   pages: { site: string; app: string };
   files: Map<string, StaticFile>;
 }
+
+/** The bundled site and app: both pages, before the head tags that depend on the address, and the files they load. */
+export interface Bundle {
+  site: string;
+  app: string;
+  /** By file name, served at /assets/<name>. */
+  files: Map<string, StaticFile>;
+}
+
+/** Where `bun run build` writes the bundle, in the app's folder. */
+export const DIST = "dist";
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
 const HOUR = "public, max-age=3600";
@@ -77,15 +88,8 @@ const APP_HEAD = [
 
 const inject = (html: string, tags: string[]) => html.replace("</head>", `${tags.join("")}</head>`);
 
-/**
- * Bundle the public site (src/site) and the app (src/web) in memory, and list
- * every file the server hands out: the bundles under /assets (named by
- * content, so cached for a year), public/ as it is, the Inter font, and the
- * service worker, written with this build's file list so it can keep the app
- * working offline.
- */
-export async function buildAssets(options: { appRoot: string; publicUrl: URL; minify?: boolean }): Promise<BuiltAssets> {
-  const { appRoot } = options;
+/** Bundle the public site (src/site) and the app (src/web) in memory. */
+export async function bundle(appRoot: string, options: { minify?: boolean } = {}): Promise<Bundle> {
   const result = await Bun.build({
     entrypoints: [path.join(appRoot, "src/site/index.html"), path.join(appRoot, "src/web/index.html")],
     root: path.join(appRoot, "src"),
@@ -98,18 +102,53 @@ export async function buildAssets(options: { appRoot: string; publicUrl: URL; mi
   if (!result.success) throw new Error(`The site and app did not build:\n${result.logs.map(String).join("\n")}`);
 
   const files = new Map<string, StaticFile>();
-  const fingerprint = createHash("sha256");
   let site = "";
   let app = "";
   for (const output of result.outputs) {
     const name = output.path.replace(/^\.\//, "");
     if (name === "site/index.html") site = await output.text();
     else if (name === "web/index.html") app = await output.text();
-    else files.set(`/assets/${name}`, { body: () => output, type: output.type, cacheControl: IMMUTABLE });
-    fingerprint.update(name);
+    else files.set(name, { body: () => output, type: output.type, cacheControl: IMMUTABLE });
   }
   if (!site || !app) throw new Error("The build did not produce both pages.");
-  fingerprint.update(site).update(app);
+  return { site, app, files };
+}
+
+/** Write a bundle to a folder (`bun run build`), replacing what was there. */
+export async function writeBundle(bundled: Bundle, dir: string): Promise<void> {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(path.join(dir, "assets"), { recursive: true });
+  writeFileSync(path.join(dir, "site.html"), bundled.site);
+  writeFileSync(path.join(dir, "app.html"), bundled.app);
+  for (const [name, file] of bundled.files) await Bun.write(path.join(dir, "assets", name), new Response(file.body()));
+}
+
+/** The bundle `bun run build` wrote to a folder, or undefined when there is none. */
+export function readBundle(dir: string): Bundle | undefined {
+  const assets = path.join(dir, "assets");
+  if (!existsSync(path.join(dir, "site.html")) || !existsSync(path.join(dir, "app.html")) || !existsSync(assets)) return undefined;
+  const files = new Map<string, StaticFile>();
+  for (const file of walk(assets)) {
+    files.set(path.relative(assets, file).split(path.sep).join("/"), { body: () => Bun.file(file), type: Bun.file(file).type, cacheControl: IMMUTABLE });
+  }
+  return { site: readFileSync(path.join(dir, "site.html"), "utf8"), app: readFileSync(path.join(dir, "app.html"), "utf8"), files };
+}
+
+/**
+ * List every file the server hands out: the bundles under /assets (named by
+ * content, so cached for a year), public/ as it is, the Inter font, and the
+ * service worker, written with this build's file list so it can keep the app
+ * working offline.
+ */
+export function buildAssets(bundled: Bundle, options: { appRoot: string; publicUrl: URL }): BuiltAssets {
+  const { appRoot } = options;
+  const { site, app } = bundled;
+  const files = new Map<string, StaticFile>();
+  const fingerprint = createHash("sha256").update(site).update(app);
+  for (const name of [...bundled.files.keys()].sort()) {
+    files.set(`/assets/${name}`, bundled.files.get(name)!);
+    fingerprint.update(name);
+  }
 
   const publicDir = path.join(appRoot, "public");
   for (const file of walk(publicDir)) {

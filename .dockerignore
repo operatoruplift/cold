@@ -2,6 +2,7 @@ node_modules
 .git
 .github
 .cold
+dist
 cold.yaml
 .env
 .env.*

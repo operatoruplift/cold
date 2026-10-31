@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Railway behind a Vercel address.** `railway.json`, and `COLD_PROXY_HOPS`
+  so rate limits see the visitor's address through a front door such as
+  `coldthecompany.vercel.app`. See docs/deploy.md.
+- **Smaller and faster to start.** The Dockerfile bundles the site and the app
+  when the image is built (`bun run build`), and the mail and AI libraries
+  load the first time they're used: an idle server holds about 40 MB instead
+  of 75, and starts about three times faster, which keeps it well inside
+  Railway's free plan.
+
 ## 0.3.0 - 2026-10-30
 
 COLD: the brand, a public site, a login, an installable app, and AI.

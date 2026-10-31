@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import nodemailer from "nodemailer";
 import type { Account, Offer } from "../../config";
 import { bold, countReasons, dim, green, indent, red, yellow, type Io } from "../../cli/io";
 import type { Message, Sequence } from "../../messages";
@@ -108,12 +107,18 @@ export interface SendOptions {
   shouldStop?: () => boolean;
 }
 
-/** A transport from the account's SMTP URL env var. */
+/** A transport from the account's SMTP URL env var. nodemailer loads with the first email, so a server that isn't sending stays small. */
 export function smtpTransport(account: Account): MailTransport {
   const name = account.email?.smtpUrlEnv;
   const url = name ? process.env[name]?.trim() : undefined;
   if (!url) throw new Error(`${name ?? "The SMTP URL env var"} is not set. Add it to .env.local, e.g. ${name}=smtps://you%40yourdomain.com:app-password@smtp.gmail.com:465`);
-  return nodemailer.createTransport(url) as unknown as MailTransport;
+  let loaded: Promise<MailTransport> | undefined;
+  const transport = () => (loaded ??= import("nodemailer").then(({ default: nodemailer }) => nodemailer.createTransport(url) as unknown as MailTransport));
+  return {
+    verify: async () => (await transport()).verify(),
+    sendMail: async (draft) => (await transport()).sendMail(draft),
+    close: () => void loaded?.then((t) => t.close?.(), () => {}),
+  };
 }
 
 /**

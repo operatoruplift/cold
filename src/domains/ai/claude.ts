@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import type { BetaContentBlock, BetaMessage, BetaMessageParam, BetaToolUnion } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 
 /** The model COLD asks, unless COLD_AI_MODEL names another. */
@@ -38,6 +38,8 @@ export class AiError extends Error {
 }
 
 let cached: { key: string; call: MessagesCall } | undefined;
+// The SDK loads with the first AI request, so a server that's only showing the site stays small.
+let sdk: typeof Anthropic | undefined;
 
 /**
  * Talk to Claude with ANTHROPIC_API_KEY. Requests stream (research can run for
@@ -49,8 +51,14 @@ export function claudeCall(env: Record<string, string | undefined> = process.env
   const key = env.ANTHROPIC_API_KEY?.trim();
   if (!key) throw new AiError("Add your Anthropic API key (ANTHROPIC_API_KEY) in Settings to use the AI features.", 400);
   if (cached?.key === key) return cached.call;
-  const client = new Anthropic({ apiKey: key, maxRetries: 2, timeout: 10 * 60 * 1000 });
-  const call: MessagesCall = (params) => client.beta.messages.stream(params).finalMessage();
+  let client: Promise<Anthropic> | undefined;
+  const call: MessagesCall = async (params) => {
+    client ??= import("@anthropic-ai/sdk").then(({ default: Sdk }) => {
+      sdk = Sdk;
+      return new Sdk({ apiKey: key, maxRetries: 2, timeout: 10 * 60 * 1000 });
+    });
+    return (await client).beta.messages.stream(params).finalMessage();
+  };
   cached = { key, call };
   return call;
 }
@@ -58,15 +66,19 @@ export function claudeCall(env: Record<string, string | undefined> = process.env
 /** What went wrong, in words for the screen. */
 export function explainError(err: unknown): AiError {
   if (err instanceof AiError) return err;
-  if (err instanceof Anthropic.AuthenticationError) return new AiError("Anthropic did not accept the API key. Check ANTHROPIC_API_KEY in Settings.", 400);
-  if (err instanceof Anthropic.PermissionDeniedError) return new AiError(`Anthropic refused the request: ${err.message}`, 403);
-  if (err instanceof Anthropic.RateLimitError) return new AiError("Anthropic's rate limit was hit. Wait a minute and try again.", 429);
-  if (err instanceof Anthropic.BadRequestError) {
-    if (/web.?search|web.?fetch/i.test(err.message)) return new AiError(`Web search is not available for this API key: ${err.message}. An organization admin can turn it on in the Claude Console.`, 400);
-    return new AiError(`Anthropic rejected the request: ${err.message}`, 400);
+  // Anthropic's errors only exist once the SDK has loaded.
+  const Sdk = sdk;
+  if (Sdk) {
+    if (err instanceof Sdk.AuthenticationError) return new AiError("Anthropic did not accept the API key. Check ANTHROPIC_API_KEY in Settings.", 400);
+    if (err instanceof Sdk.PermissionDeniedError) return new AiError(`Anthropic refused the request: ${err.message}`, 403);
+    if (err instanceof Sdk.RateLimitError) return new AiError("Anthropic's rate limit was hit. Wait a minute and try again.", 429);
+    if (err instanceof Sdk.BadRequestError) {
+      if (/web.?search|web.?fetch/i.test(err.message)) return new AiError(`Web search is not available for this API key: ${err.message}. An organization admin can turn it on in the Claude Console.`, 400);
+      return new AiError(`Anthropic rejected the request: ${err.message}`, 400);
+    }
+    if (err instanceof Sdk.APIConnectionError) return new AiError("Could not reach Anthropic. Check the server's internet connection.", 502);
+    if (err instanceof Sdk.APIError) return new AiError(`Anthropic error ${err.status ?? ""}: ${err.message}`.trim(), 502);
   }
-  if (err instanceof Anthropic.APIConnectionError) return new AiError("Could not reach Anthropic. Check the server's internet connection.", 502);
-  if (err instanceof Anthropic.APIError) return new AiError(`Anthropic error ${err.status ?? ""}: ${err.message}`.trim(), 502);
   return new AiError((err as Error).message ?? String(err), 500);
 }
 

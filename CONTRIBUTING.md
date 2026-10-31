@@ -37,7 +37,10 @@ bun run dev            # http://localhost:4100 (site) and /app/, restarted on ev
   only, never runtime code (a test checks the bundle).
 - The server is `src/domains/web/`: `server/` (the build, the request handler,
   the login gate), `api/` (campaigns and settings), `ai/` (the AI routes).
-- Both are bundled in memory when the server starts. Files in `public/` are
+- Both are bundled when the server starts, so `bun run ui` and `bun run dev`
+  always show your latest changes. In production, `bun run build` bundles them
+  once into `dist/` (the Dockerfile runs it), and a server with
+  `NODE_ENV=production` serves that instead. Files in `public/` are
   served as they are; reference them by absolute path (`/brand/cold-logo.svg`)
   from TypeScript and CSS, and let the server add the head tags.
 - Colours, radii and sizes are tokens (`src/web/styles.css`,
