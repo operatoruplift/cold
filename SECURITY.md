@@ -7,9 +7,12 @@ repository (Security, Advisories), not in a public issue.
 
 ## Keeping your setup safe
 
-- **Secrets live in `.env.local` only.** Mailbox URLs carry passwords and the
-  Twenty key opens your CRM. `.env.local`, `.env` and `cold.yaml` are
-  gitignored; keep them that way.
+- **Secrets live in `.env.local` only** on your computer. Mailbox URLs carry
+  passwords and the Twenty key opens your CRM. `.env.local`, `.env` and
+  `cold.yaml` are gitignored; keep them that way. On Vercel, what you save in
+  Settings is stored in the database encrypted (AES-256-GCM) with
+  `COLD_SECRET_KEY`, which lives only in Vercel's environment settings; a copy
+  of the database alone does not reveal it.
 - **Use app passwords, not account passwords,** for Gmail, Google Workspace
   and Microsoft 365 mailboxes, and revoke them when a mailbox is retired.
 - **Scope the Twenty key.** Give it a role that can read people, companies and
@@ -27,9 +30,11 @@ repository (Security, Advisories), not in a public issue.
   own header on every API call, so other websites open in your browser cannot
   drive it.
 - **Hosted, use HTTPS.** Set `COLD_PUBLIC_URL` to an `https://` address so the
-  session cookie is `Secure` and browsers get HSTS. Keep the `/data` volume
-  private: it holds `.env.local` (mailbox passwords, API keys) and the
-  database.
+  session cookie is `Secure` and browsers get HSTS (on Vercel this is
+  automatic). Keep the `/data` volume private: it holds `.env.local` (mailbox
+  passwords, API keys) and the database. On Vercel, the cron route answers
+  only to `CRON_SECRET`, and sign-in limits are counted in the database, so
+  every copy of the function shares them.
 - **The Anthropic key is billed to you.** Keep `ANTHROPIC_API_KEY` in
   `.env.local` or the server's secrets, set a spend limit in the Claude
   Console, and rotate it if it leaks. Settings shows what the AI features used

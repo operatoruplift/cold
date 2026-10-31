@@ -157,7 +157,7 @@ function TabBar({ path }: { path: string }) {
 function TopBar({ title, icon: Icon }: { title: string; icon: LucideIcon }) {
   const { data } = useStatus();
   const store = data?.store;
-  const storeText = !store ? "" : "error" in store ? "Touch log unavailable" : store.kind === "twenty" ? "Logging to Twenty" : "Logging to a local file";
+  const storeText = !store ? "" : "error" in store ? "Touch log unavailable" : store.kind === "twenty" ? "Logging to Twenty" : store.kind === "database" ? "Logging to the database" : "Logging to a local file";
   const tone = !store ? "" : "error" in store ? "red" : store.kind === "twenty" ? "green" : "amber";
   return (
     <header className="topbar">

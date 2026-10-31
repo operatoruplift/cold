@@ -254,18 +254,19 @@ http://localhost:4100. Then:
 `bun run desktop` does the same and opens the app in its own window. On a
 computer it listens on `127.0.0.1:4100` only (`COLD_UI_PORT` changes the
 port), and refuses requests from other websites: it checks the `Host` and
-`Origin` headers and requires its own header on every API call. Keep it running
-while a send is going; the send stops if COLD is closed.
+`Origin` headers and requires its own header on every API call. A send is
+saved after every email, so if you close COLD mid-way it carries on where it
+stopped the next time COLD starts.
 
 ### Host it
 
-To reach COLD from your phone, share the site and collect a waitlist, run it on
-a server with HTTPS: Railway (the repository carries its `railway.json`, and
-COLD fits in Railway's free plan), Render, Fly or any VPS. One container, one
-volume for your files. Set `COLD_PUBLIC_URL` (Railway, Render and Fly fill it in
-for you), deploy, and open the setup link it prints in the logs. A Vercel
-address can stand in front as the public URL. Step by step:
-[docs/deploy.md](docs/deploy.md).
+To reach COLD from your phone, share the site and collect a waitlist, put it
+on the web. On **Vercel** (the repository carries its `vercel.json`) the site
+and the app are served from Vercel's CDN, the API runs as one function, and
+everything you save lives in a free Turso database: add Turso to the project,
+deploy, and open the setup link from the function's logs. Or run the
+**Dockerfile** on any host that keeps a disk (Railway, Render, Fly, a VPS).
+Step by step: [docs/deploy.md](docs/deploy.md).
 
 ### From the terminal
 
@@ -401,6 +402,7 @@ one Twenty workspace and they share everything:
 | [Cal.com](https://github.com/calcom/cal.com) | MIT | Your booking link (`{{booking_url}}`) |
 | [Cap](https://github.com/CapSoftware/Cap) | AGPLv3 | Records the personal videos the video sequences send (`{{video_url}}`) |
 | [Bun](https://bun.sh) | MIT | Runs it, serves it, bundles the site and the app, stores the waitlist and logins in SQLite |
+| [Turso](https://turso.tech) via [@libsql/client](https://github.com/tursodatabase/libsql-client-ts) | MIT (client) | The same SQLite, over the network, when COLD runs on Vercel |
 | [Claude](https://docs.anthropic.com) via [@anthropic-ai/sdk](https://github.com/anthropics/anthropic-sdk-typescript) | MIT (SDK) | Prospect research with web search, drafts, call prep, reply triage |
 | [React](https://react.dev) and [Lucide](https://lucide.dev) | MIT, ISC | The app's interface and icons |
 | [Inter](https://rsms.me/inter/) via [Fontsource](https://fontsource.org) | OFL 1.1 | The type: Inter Display for headings, Inter for everything else |
@@ -505,7 +507,9 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 |---|---|
 | `cold.yaml` | Accounts (voice, sender details, mailbox settings, caps, sending window) and offers. Start from `cold.example.yaml`. |
 | `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, `ANTHROPIC_API_KEY`, optional `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`, or set them in Settings. |
-| `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts (SQLite). |
+| `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts, and email sends (SQLite). |
+| `COLD_DATABASE_URL`, `COLD_DATABASE_TOKEN` | Use a Turso (libSQL) database instead; the Turso integration on Vercel sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which work too. There your files, the touch log and saved keys live in it as well. |
+| `COLD_SECRET_KEY` | On a database: encrypts the keys and passwords saved in Settings. |
 | `COLD_CONFIG` | Point at a config file somewhere else. |
 | `COLD_HOME` | Keep `cold.yaml`, `.env.local`, `.cold/`, prospect lists and a copy of `messages/` in another folder (a server's volume). |
 | `COLD_PUBLIC_URL` | Run as a hosted server at this address (see [docs/deploy.md](docs/deploy.md)). |
@@ -516,6 +520,7 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 ## Repository layout
 
 ```
+api/index.ts              the Vercel function (everything under /api)
 messages/                 the library (see messages/README.md)
 public/                   logos, app icons, the web app manifest, the share image
 src/
@@ -528,7 +533,8 @@ src/
     auth/                 the owner login: argon2id, sessions, rate limits, setup codes
     waitlist/             signups from the site
     ai/                   Claude: finding and researching prospects, drafts, call prep, triage
-    db/                   the SQLite file and its migrations
+    db/                   the database (a SQLite file, or Turso) and its migrations
+    storage/              your files and saved keys: a folder, or the database
     messages/             load and lint the library
     render/               the template syntax and the variable contract
     config/               cold.yaml

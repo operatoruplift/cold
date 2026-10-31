@@ -2,14 +2,24 @@
 
 ## Unreleased
 
-- **Railway behind a Vercel address.** `railway.json`, and `COLD_PROXY_HOPS`
-  so rate limits see the visitor's address through a front door such as
-  `coldthecompany.vercel.app`. See docs/deploy.md.
+- **Runs on Vercel.** The site and the app are served from Vercel's CDN, the
+  API runs as one function (`api/index.ts`, on Bun), and everything you save
+  lives in a free Turso database: your files, the touch log, the waitlist,
+  your login, and the keys you save in Settings, encrypted with
+  `COLD_SECRET_KEY`. Rate limits and the setup code are shared by every copy
+  of the function. See docs/deploy.md.
+- **Sends outlive the server.** A send is kept in the database and saved
+  after every email: it carries on after a restart (on Vercel, the cron job
+  picks it up every minute), an email that was going out when a server
+  stopped is never sent twice, and Stop ends a send in its pause.
+- **One storage layer.** cold.yaml, the message library, prospect lists,
+  campaigns and the Twenty journal go through it: a folder on your computer
+  (as before, so the command line still reads them), or the database.
 - **Smaller and faster to start.** The Dockerfile bundles the site and the app
   when the image is built (`bun run build`), and the mail and AI libraries
   load the first time they're used: an idle server holds about 40 MB instead
-  of 75, and starts about three times faster, which keeps it well inside
-  Railway's free plan.
+  of 75.
+- `railway.json` and `COLD_PROXY_HOPS` for Docker hosts behind a proxy.
 
 ## 0.3.0 - 2026-10-30
 
