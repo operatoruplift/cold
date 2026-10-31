@@ -123,6 +123,22 @@ export async function writeBundle(bundled: Bundle, dir: string): Promise<void> {
   for (const [name, file] of bundled.files) await Bun.write(path.join(dir, "assets", name), new Response(file.body()));
 }
 
+/**
+ * Every page and file as a plain static site, for a CDN (Vercel): the site at
+ * index.html, the app at app/index.html, the rest at their own paths.
+ */
+export async function writeStatic(assets: BuiltAssets, dir: string): Promise<void> {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(path.join(dir, "app"), { recursive: true });
+  writeFileSync(path.join(dir, "index.html"), assets.pages.site);
+  writeFileSync(path.join(dir, "app", "index.html"), assets.pages.app);
+  for (const [url, file] of assets.files) {
+    const target = path.join(dir, url.slice(1));
+    mkdirSync(path.dirname(target), { recursive: true });
+    await Bun.write(target, new Response(file.body()));
+  }
+}
+
 /** The bundle `bun run build` wrote to a folder, or undefined when there is none. */
 export function readBundle(dir: string): Bundle | undefined {
   const assets = path.join(dir, "assets");

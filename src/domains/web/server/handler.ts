@@ -102,6 +102,38 @@ export class DbSetupCode implements SetupCodes {
   }
 }
 
+/** What a page may load: only this site's own files. vercel.json repeats it for the pages Vercel serves; a test keeps the two the same. */
+export function contentSecurityPolicy(secure: boolean): string {
+  return [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "media-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "manifest-src 'self'",
+    "worker-src 'self'",
+    ...(secure ? ["upgrade-insecure-requests"] : []),
+  ].join("; ");
+}
+
+/** Headers on every response. */
+export function securityHeaders(secure: boolean): Record<string, string> {
+  return {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "x-frame-options": "DENY",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
+    "cross-origin-opener-policy": "same-origin",
+    ...(secure ? { "strict-transport-security": "max-age=31536000" } : {}),
+  };
+}
+
 export interface HandlerDeps {
   settings: ServerSettings;
   /** The site and app pages and their files. Without them (on Vercel, where the CDN serves them) only /api is answered. */
@@ -117,6 +149,8 @@ export interface HandlerDeps {
   clientIp: (request: Request) => string | undefined;
   /** Rate limit counters: in memory by default, in the database when several servers share the work. */
   limiter?: (limit: number, windowMs: number) => Limiter;
+  /** What Vercel's cron job runs every minute (the next emails of a send), behind CRON_SECRET. */
+  cron?: () => Promise<void>;
   now?: () => Date;
 }
 
@@ -168,32 +202,12 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
   // A ceiling across everyone, so a botnet cannot fill the database.
   const waitlistDaily = limiter(5000, 24 * 60 * 60_000);
   const secure = settings.secureCookies;
-  const csp = [
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
-    "media-src 'self' blob:",
-    "object-src 'none'",
-    "base-uri 'none'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "manifest-src 'self'",
-    "worker-src 'self'",
-    ...(secure ? ["upgrade-insecure-requests"] : []),
-  ].join("; ");
+  const headers = securityHeaders(secure);
+  const csp = contentSecurityPolicy(secure);
 
   function harden(response: Response, page = false): Response {
-    const h = response.headers;
-    h.set("x-content-type-options", "nosniff");
-    h.set("referrer-policy", "strict-origin-when-cross-origin");
-    h.set("x-frame-options", "DENY");
-    h.set("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=()");
-    h.set("cross-origin-opener-policy", "same-origin");
-    if (page) h.set("content-security-policy", csp);
-    if (secure) h.set("strict-transport-security", "max-age=31536000");
+    for (const [name, value] of Object.entries(headers)) response.headers.set(name, value);
+    if (page) response.headers.set("content-security-policy", csp);
     return response;
   }
 
@@ -215,6 +229,12 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     switch (route) {
       case "GET /api/health":
         return json({ ok: true, version });
+      case "GET /api/cron/tick": {
+        const secret = process.env.CRON_SECRET;
+        if (!deps.cron || !secret || request.headers.get("authorization") !== `Bearer ${secret}`) throw new HttpError(401, "Not for you.");
+        await deps.cron();
+        return json({ ok: true });
+      }
       case "GET /api/session": {
         const session = await auth.check(token);
         return json(await sessionState(!!session), 200, session?.refreshed && token ? { "set-cookie": sessionCookie(token, session.expiresAt, secure, now()) } : {});

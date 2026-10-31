@@ -5,7 +5,7 @@ import { callSheetData, syncCallScripts } from "../../call";
 import type { Io } from "../../cli/io";
 import { APP_ROOT, getOffer, parseConfig, type Account, type ColdConfig, type Offer } from "../../config";
 import { dmChecklist, prepareDmRun, recordDmOutcome, type DmOutcome } from "../../dm";
-import { describeWindow, prepareEmailRun, reacherFromEnv, sendEmails, smtpTransport, syncReplies, testImap, type EmailOverride } from "../../email";
+import { describeWindow, prepareEmailRun, smtpTransport, syncReplies, testImap, toSendPlan, type EmailOverride } from "../../email";
 import { findMessage, findSequence, lintMessage, lintSequences, toMessage, toSequences, type Library, type Message } from "../../messages";
 import { buildVariables, renderForProspect } from "../../outreach";
 import { findProspect, parseCsv, type Prospect } from "../../prospects";
@@ -14,7 +14,8 @@ import { summarize } from "../../stats";
 import { TOUCH_KINDS, twentyClient, type Touch } from "../../touches";
 import { applySchema, readLiveSchema, twentyConfigFromEnv } from "../../twenty";
 import { draftKey } from "../../ai";
-import { OWN_LIST, type WebContext } from "../context";
+import { invocationDeadline, keepAlive } from "../background";
+import type { WebContext } from "../context";
 import type {
   ActionResponse,
   Campaign,
@@ -417,32 +418,44 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
         const { sequence, account, offer } = resolveCampaign(campaign, (await ctx.library()).library, config);
         if (sequence.channel !== "email") throw new HttpError(400, "DMs are sent by you: work through them on the campaign page.");
         if (!ctx.options.transport && !process.env[account.email!.smtpUrlEnv]?.trim()) throw new HttpError(409, `The mailbox is not connected: set ${account.email!.smtpUrlEnv} in Settings.`);
-        if (ctx.jobs.running(account.key)) throw new HttpError(409, `Already sending from ${account.key}. Wait for it to finish, or stop it.`);
+        const sends = ctx.sends;
+        if (!sends) throw new HttpError(500, "Sending needs the app's database.");
+        if (await sends.running(account.key)) throw new HttpError(409, `Already sending from ${account.key}. Wait for it to finish, or stop it.`);
         const store = await ctx.store(config);
         const prospects = await ctx.prospects(campaign.source, campaign.where);
         const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, limit: typeof limit === "number" && limit > 0 ? limit : undefined, now: () => ctx.now(), override: await emailOverride(campaign) });
         if (prepared.batch.length === 0) throw new HttpError(409, "Nothing to send right now.");
         if (prepared.windowOpen === false && !ignoreWindow) throw new HttpError(409, `Outside the sending window (${prepared.windowText}). Tick "Send anyway" to override.`);
-        const transport = ctx.options.transport?.(account) ?? smtpTransport(account);
-        const job = ctx.jobs.start(account.key, (handle) =>
-          sendEmails(prepared, { store, ignoreWindow, transport, verifier: reacherFromEnv(), now: () => ctx.now(), random: ctx.options.random, sleep: handle.sleep, onEvent: handle.emit, shouldStop: handle.shouldStop }),
-        );
+        let job: string;
+        try {
+          job = await sends.start(account.key, toSendPlan(prepared), ignoreWindow);
+        } catch (err) {
+          throw new HttpError(409, (err as Error).message);
+        }
+        // The first email goes now; the rest follow as their pauses come up.
+        keepAlive(sends.tick({ deadline: invocationDeadline() }).catch((err) => console.error("send:", err)));
         return json({ job, total: prepared.batch.length }, 202);
       },
     ],
     [
       "GET",
       /^\/api\/jobs\/([\w-]+)$/,
-      (_request, [id], url) => {
-        const view = ctx.jobs.view(id!, Number(url.searchParams.get("after") ?? 0) || 0);
-        if (!view) throw new HttpError(404, "No such job: the server may have restarted.");
+      async (_request, [id], url) => {
+        const view = await ctx.sends?.view(id!, Number(url.searchParams.get("after") ?? 0) || 0);
+        if (!view) throw new HttpError(404, "No such send.");
         return json(view);
       },
     ],
     [
       "POST",
       /^\/api\/jobs\/([\w-]+)\/stop$/,
-      (_request, [id]) => json({ ok: ctx.jobs.stop(id!) }),
+      async (_request, [id]) => {
+        const sends = ctx.sends;
+        const ok = !!sends && (await sends.stop(id!));
+        // A send waiting for its next email ends now, rather than when that email was due.
+        if (ok) keepAlive(sends!.tick({ deadline: invocationDeadline() }).catch((err) => console.error("send:", err)));
+        return json({ ok });
+      },
     ],
     [
       "POST",

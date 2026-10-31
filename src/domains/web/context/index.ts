@@ -3,13 +3,13 @@ import path from "node:path";
 import { AiStore, claudeCall, type MessagesCall } from "../../ai";
 import { APP_ROOT, configFromText, type Account, type ColdConfig } from "../../config";
 import type { Db } from "../../db";
-import type { MailTransport } from "../../email";
+import { reacherFromEnv, smtpTransport, type MailTransport } from "../../email";
 import { loadLibraryFrom } from "../../messages";
 import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects";
 import { DbFiles, DiskFiles, EnvFileSecrets, type Files, type Secrets } from "../../storage";
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
 import { CampaignStore } from "../campaigns";
-import { JobRegistry } from "../jobs";
+import { SendJobs } from "../sends";
 
 export interface WebContextOptions {
   /** A folder holding your files (cold.yaml, messages/, prospect lists, .cold/): what `bun run ui` uses. */
@@ -50,9 +50,10 @@ export class WebContext {
   readonly files: Files;
   readonly secrets?: Secrets;
   readonly campaigns: CampaignStore;
-  readonly jobs = new JobRegistry();
   /** AI runs and drafts; only when the app has its database. */
   readonly ai?: AiStore;
+  /** Email sends, kept in the database so they outlive the server; only with the database. */
+  readonly sends?: SendJobs;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -63,7 +64,19 @@ export class WebContext {
     this.files = options.files ?? new DiskFiles(options.root!);
     this.secrets = options.secrets ?? (options.root ? new EnvFileSecrets(path.join(options.root, ".env.local")) : undefined);
     this.campaigns = new CampaignStore(this.files);
-    if (options.db) this.ai = new AiStore(options.db, () => this.now());
+    if (options.db) {
+      this.ai = new AiStore(options.db, () => this.now());
+      this.sends = new SendJobs(options.db, {
+        // Opened when a send picks up, from what is saved now: on Vercel that may be a later function than the one that queued it.
+        tools: async (plan) => {
+          await this.freshen();
+          const store = await this.store(await this.requireConfig());
+          return { store, transport: options.transport?.(plan.account) ?? smtpTransport(plan.account), verifier: reacherFromEnv() };
+        },
+        now: () => this.now(),
+        random: options.random,
+      });
+    }
   }
 
   /** Where your files are: a folder on this computer, or the database. */

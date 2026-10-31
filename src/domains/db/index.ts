@@ -178,6 +178,7 @@ const MIGRATIONS: string[] = [
      updated_at TEXT NOT NULL
    );
    CREATE INDEX send_jobs_due ON send_jobs (status, next_at);
+   CREATE UNIQUE INDEX send_jobs_one_per_lane ON send_jobs (lane) WHERE status = 'running';
    CREATE TABLE send_events (
      job_id TEXT NOT NULL,
      seq INTEGER NOT NULL,

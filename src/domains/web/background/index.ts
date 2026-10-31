@@ -1,4 +1,4 @@
-import { waitUntil } from "@vercel/functions";
+import { getDeadline, waitUntil } from "@vercel/functions";
 
 /**
  * Work that carries on after the response: an AI run, the next email of a
@@ -8,4 +8,9 @@ import { waitUntil } from "@vercel/functions";
  */
 export function keepAlive(work: Promise<unknown>): void {
   waitUntil(work);
+}
+
+/** When this function has to be finished: Vercel's deadline for the request, or never on your computer. */
+export function invocationDeadline(): number {
+  return getDeadline()?.getTime() ?? Number.POSITIVE_INFINITY;
 }

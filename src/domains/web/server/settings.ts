@@ -25,9 +25,9 @@ export interface ServerSettings {
  * Local by default: 127.0.0.1 only, answering to localhost. COLD_PUBLIC_URL
  * makes it a hosted server: it listens on every interface (or COLD_HOST),
  * answers to that URL's host name, and marks cookies Secure when it is HTTPS.
- * PORT (set by most hosts) or COLD_UI_PORT picks the port. On Railway,
- * Render and Fly the public URL is known without COLD_PUBLIC_URL, and the
- * platform's own domain is always answered too.
+ * PORT (set by most hosts) or COLD_UI_PORT picks the port. On Vercel,
+ * Railway, Render and Fly the public URL is known without COLD_PUBLIC_URL,
+ * and the platform's own domains are always answered too.
  */
 export function serverSettings(env: Record<string, string | undefined> = process.env): ServerSettings {
   const port = Number(env.PORT || env.COLD_UI_PORT) || 4100;
@@ -54,7 +54,15 @@ export function serverSettings(env: Record<string, string | undefined> = process
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("COLD_PUBLIC_URL must start with https:// (or http://)");
   // The host's own domain keeps working next to a custom or front-door address (Vercel forwards with it as the Host).
-  const platform = [env.RAILWAY_PUBLIC_DOMAIN, env.RENDER_EXTERNAL_HOSTNAME, env.FLY_APP_NAME && `${env.FLY_APP_NAME}.fly.dev`].filter((h): h is string => !!h);
+  const platform = [
+    env.RAILWAY_PUBLIC_DOMAIN,
+    env.RENDER_EXTERNAL_HOSTNAME,
+    env.FLY_APP_NAME && `${env.FLY_APP_NAME}.fly.dev`,
+    // Vercel: the production domain, this deployment's own address, and its branch's.
+    env.VERCEL_PROJECT_PRODUCTION_URL,
+    env.VERCEL_URL,
+    env.VERCEL_BRANCH_URL,
+  ].filter((h): h is string => !!h);
   const extra = [...new Set([...(env.COLD_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim()), ...platform])].filter((h) => h && h !== url.host);
   return {
     mode: "hosted",
@@ -75,5 +83,6 @@ function publicUrlFrom(env: Record<string, string | undefined>): string | undefi
   if (env.RENDER_EXTERNAL_URL) return env.RENDER_EXTERNAL_URL;
   if (env.RAILWAY_PUBLIC_DOMAIN) return `https://${env.RAILWAY_PUBLIC_DOMAIN}`;
   if (env.FLY_APP_NAME) return `https://${env.FLY_APP_NAME}.fly.dev`;
+  if (env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`;
   return undefined;
 }

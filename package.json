@@ -39,6 +39,7 @@
     "dev": "bun --watch src/domains/web/server/index.ts --no-open",
     "desktop": "bun src/domains/web/server/index.ts --window",
     "build": "bun src/domains/web/server/build.ts",
+    "build:vercel": "bun src/domains/web/server/build.ts --static dist/static",
     "lint:messages": "bun src/cli.ts lint",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

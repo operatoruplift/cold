@@ -3,7 +3,7 @@ import type { Account, Offer } from "../../config";
 import { bold, countReasons, dim, green, indent, red, yellow, type Io } from "../../cli/io";
 import type { Message, Sequence } from "../../messages";
 import { buildVariables, renderForProspect, startOfDay } from "../../outreach";
-import type { Prospect } from "../../prospects";
+import type { Prospect, ProspectLinks } from "../../prospects";
 import { renderTemplate } from "../../render";
 import { planSequence, type Plan, type Touch, type TouchStore } from "../../touches";
 import { addressOf, buildEmail, classifySmtpFailure, describeWindow, domainOf, isInWindow } from "../helpers";
@@ -200,44 +200,144 @@ export async function prepareEmailRun(input: {
   };
 }
 
+/** One email of a send, written down: enough to send and log it, after a restart too. */
+export interface SendItem {
+  step?: number;
+  templateId: string;
+  prospectKey: string;
+  prospectLabel: string;
+  links?: ProspectLinks;
+  address: string;
+  draft: EmailDraft;
+}
+
+/** A prepared send, without anything that cannot be written down. */
+export interface SendPlan {
+  sequenceId: string;
+  account: Account;
+  items: SendItem[];
+}
+
+/** How far a send has come. Saved after every email, so a send can stop and carry on. */
+export interface SendState {
+  /** The next email to send. */
+  index: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  failuresInARow: number;
+  /** The mailbox accepted the login. */
+  verified: boolean;
+  /** The email that was going out when the send last stopped mid-way: it may have been sent. */
+  inflight?: number;
+  aborted?: string;
+  done: boolean;
+}
+
+export interface StepOptions {
+  store: TouchStore;
+  transport: MailTransport;
+  verifier?: Verifier;
+  ignoreWindow: boolean;
+  now: () => Date;
+  random: () => number;
+  log: (line?: string) => void;
+  emit: (event: EmailEvent) => void;
+  shouldStop: () => boolean | Promise<boolean>;
+  /** Called just before an email goes to the mailbox, with that email marked in flight, so a crash then cannot send it twice. */
+  beforeSend?: (state: SendState) => Promise<void>;
+}
+
+export const newSendState = (): SendState => ({ index: 0, sent: 0, failed: 0, skipped: 0, failuresInARow: 0, verified: false, done: false });
+
+export const sendResult = (state: SendState): EmailRunResult => ({ sent: state.sent, failed: state.failed, skipped: state.skipped, ...(state.aborted ? { aborted: state.aborted } : {}) });
+
+export function toSendPlan(prepared: PreparedEmailRun): SendPlan {
+  return {
+    sequenceId: prepared.sequence.id,
+    account: prepared.account,
+    items: prepared.batch.map((r) => ({ step: r.step.step, templateId: r.step.id, prospectKey: r.prospect.key, prospectLabel: r.prospect.label, links: r.prospect.links, address: r.address, draft: r.draft })),
+  };
+}
+
 /**
- * Send a prepared batch. Every email is logged before the next goes out; the
- * sending window is checked before each one; a refused mailbox, three
- * failures in a row, a touch that cannot be logged, or `shouldStop` ends the
- * batch early. Each step is reported to `io` (the terminal) and `onEvent`
- * (the web UI).
+ * The next thing a send has to do: check the mailbox (first time), then send
+ * or skip one email and log it. Returns the new state and how long to wait
+ * before the next step. The sending window is checked before each email; a
+ * refused mailbox, three failures in a row, a touch that cannot be logged,
+ * or `shouldStop` ends the send early.
  */
-export async function sendEmails(prepared: PreparedEmailRun, options: SendOptions): Promise<EmailRunResult> {
-  const { sequence, account, batch } = prepared;
+export async function sendStep(plan: SendPlan, state: SendState, options: StepOptions): Promise<{ state: SendState; waitMs: number }> {
+  const s: SendState = { ...state };
+  const { account, items, sequenceId } = plan;
   const email = account.email!;
-  const { store } = options;
-  const now = options.now ?? (() => new Date());
-  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const random = options.random ?? Math.random;
-  const log = (line = "") => options.io?.log(line);
-  const emit = (event: EmailEvent) => options.onEvent?.(event);
-  const result: EmailRunResult = { sent: 0, failed: 0, skipped: 0 };
-  const stop = (reason: string, tone: (s: string) => string = red) => {
-    result.aborted = reason;
+  const { log, emit, now } = options;
+  const stop = (reason: string, tone: (text: string) => string = red) => {
+    s.aborted = reason;
+    s.done = true;
     log(tone(`Stopping: ${reason}.`));
     emit({ type: "stopped", reason });
   };
+  const moveOn = () => {
+    s.inflight = undefined;
+    s.index++;
+    if (s.index >= items.length) s.done = true;
+  };
 
-  const transport = options.transport ?? smtpTransport(account);
-  try {
-    await transport.verify();
-  } catch (err) {
-    result.aborted = `the mailbox refused the connection: ${(err as Error).message}`;
-    log(red(`Not sending: ${result.aborted}`));
-    emit({ type: "stopped", reason: result.aborted });
-    return result;
+  if (s.done) return { state: s, waitMs: 0 };
+  if (!s.verified) {
+    try {
+      await options.transport.verify();
+    } catch (err) {
+      s.aborted = `the mailbox refused the connection: ${(err as Error).message}`;
+      s.done = true;
+      log(red(`Not sending: ${s.aborted}`));
+      emit({ type: "stopped", reason: s.aborted });
+      return { state: s, waitMs: 0 };
+    }
+    s.verified = true;
+  }
+  if (s.index >= items.length) {
+    s.done = true;
+    return { state: s, waitMs: 0 };
   }
 
-  let failuresInARow = 0;
-  /** Log a touch; when the store cannot, stop the run so nothing is sent unrecorded. */
+  const index = s.index;
+  const r = items[index]!;
+  if (s.inflight === index) {
+    // The send stopped while this one was going out, so it may have been sent. Never send it twice.
+    s.skipped++;
+    log(`${yellow("skip")} ${r.prospectLabel} <${r.address}>: interrupted while sending`);
+    emit({ type: "skipped", label: r.prospectLabel, address: r.address, reason: "interrupted while it was going out: check your Sent folder before writing to them again" });
+    moveOn();
+    return { state: s, waitMs: 0 };
+  }
+  if (index > 0 && (await options.shouldStop())) {
+    stop(`stopped by you; ${items.length - index} left for next time`, yellow);
+    return { state: s, waitMs: 0 };
+  }
+  if (index > 0 && email.window && !options.ignoreWindow && !isInWindow(now(), email.window)) {
+    stop(`the sending window closed (${describeWindow(email.window)}); ${items.length - index} left for next time`, yellow);
+    return { state: s, waitMs: 0 };
+  }
+
+  const base: Omit<Touch, "kind" | "occurredAt"> = {
+    channel: "EMAIL",
+    voice: account.voice === "personal" ? "PERSONAL" : "COMPANY",
+    account: account.key,
+    sequence: sequenceId,
+    step: r.step,
+    templateId: r.templateId,
+    prospectKey: r.prospectKey,
+    prospectLabel: r.prospectLabel,
+    toAddress: r.address,
+    fromAddress: addressOf(email.from),
+    links: r.links,
+  };
+  /** Log a touch; when the store cannot, stop the send so nothing goes out unrecorded. */
   const save = async (touch: Touch): Promise<boolean> => {
     try {
-      await store.record(touch);
+      await options.store.record(touch);
       return true;
     } catch (err) {
       stop(`a touch could not be logged: ${(err as Error).message}`);
@@ -245,84 +345,93 @@ export async function sendEmails(prepared: PreparedEmailRun, options: SendOption
     }
   };
 
+  if (r.step === 1 && options.verifier) {
+    const verdict = await options.verifier.check(r.address);
+    if (verdict === "invalid") {
+      if (!(await save({ ...base, kind: "UNDELIVERABLE", error: "Reacher: invalid", occurredAt: now().toISOString() }))) return { state: s, waitMs: 0 };
+      log(`${yellow("skip")} ${r.prospectLabel} <${r.address}>: verified undeliverable`);
+      emit({ type: "skipped", label: r.prospectLabel, address: r.address, reason: "verified undeliverable" });
+      s.skipped++;
+      moveOn();
+      return { state: s, waitMs: 0 };
+    }
+  }
+
+  await options.beforeSend?.({ ...s, inflight: index });
+  s.inflight = index;
+  let failure: (Error & { code?: string; responseCode?: number; command?: string }) | undefined;
   try {
-    for (const [index, r] of batch.entries()) {
-      if (index > 0 && options.shouldStop?.()) {
-        stop(`stopped by you; ${batch.length - index} left for next time`, yellow);
-        break;
-      }
-      if (index > 0 && email.window && !options.ignoreWindow && !isInWindow(now(), email.window)) {
-        stop(`the sending window closed (${describeWindow(email.window)}); ${batch.length - index} left for next time`, yellow);
-        break;
-      }
+    await options.transport.sendMail(r.draft);
+  } catch (err) {
+    failure = err as Error & { code?: string; responseCode?: number; command?: string };
+  }
 
-      const base: Omit<Touch, "kind" | "occurredAt"> = {
-        channel: "EMAIL",
-        voice: account.voice === "personal" ? "PERSONAL" : "COMPANY",
-        account: account.key,
-        sequence: sequence.id,
-        step: r.step.step,
-        templateId: r.step.id,
-        prospectKey: r.prospect.key,
-        prospectLabel: r.prospect.label,
-        toAddress: r.address,
-        fromAddress: addressOf(email.from),
-        links: r.prospect.links,
-      };
+  if (!failure) {
+    // Sent: from here on it must be logged before anything else goes out.
+    s.sent++;
+    const logged = await save({ ...base, kind: "SENT", subject: r.draft.subject, body: r.draft.text, messageId: r.draft.messageId, occurredAt: now().toISOString() });
+    moveOn();
+    if (!logged) return { state: { ...s, done: true }, waitMs: 0 };
+    s.failuresInARow = 0;
+    log(`${green("sent")} ${r.prospectLabel} <${r.address}>  ${dim(`step ${r.step}`)}`);
+    emit({ type: "sent", label: r.prospectLabel, address: r.address, step: r.step ?? 0 });
+  } else {
+    const kind = classifySmtpFailure(failure);
+    s.failed++;
+    s.failuresInARow++;
+    const detail = `${failure.code ?? ""} ${failure.message}`.trim().slice(0, 1000);
+    const logged = await save({ ...base, kind: kind === "recipient" ? "BOUNCED" : "FAILED", error: detail, occurredAt: now().toISOString() });
+    moveOn();
+    if (!logged) return { state: { ...s, done: true }, waitMs: 0 };
+    log(`${red(kind === "recipient" ? "rejected" : "failed")} ${r.prospectLabel} <${r.address}>: ${failure.message}`);
+    emit({ type: "failed", label: r.prospectLabel, address: r.address, step: r.step ?? 0, reason: failure.message, bounced: kind === "recipient" });
+    if (kind === "mailbox" || s.failuresInARow >= 3) {
+      stop(kind === "mailbox" ? `the mailbox stopped accepting mail (${failure.code ?? failure.command ?? "error"}: ${failure.message.slice(0, 120)})` : "three failures in a row");
+      return { state: s, waitMs: 0 };
+    }
+  }
 
-      if (r.step.step === 1 && options.verifier) {
-        const verdict = await options.verifier.check(r.address);
-        if (verdict === "invalid") {
-          if (!(await save({ ...base, kind: "UNDELIVERABLE", error: "Reacher: invalid", occurredAt: now().toISOString() }))) break;
-          log(`${yellow("skip")} ${r.prospect.label} <${r.address}>: verified undeliverable`);
-          emit({ type: "skipped", label: r.prospect.label, address: r.address, reason: "verified undeliverable" });
-          result.skipped++;
-          continue;
-        }
-      }
+  if (s.done) return { state: s, waitMs: 0 };
+  const min = email.minDelaySeconds * 1000;
+  const max = email.maxDelaySeconds * 1000;
+  const pause = Math.round(min + options.random() * (max - min));
+  emit({ type: "pause", seconds: Math.round(pause / 1000) });
+  return { state: s, waitMs: pause };
+}
 
-      let failure: (Error & { code?: string; responseCode?: number; command?: string }) | undefined;
-      try {
-        await transport.sendMail(r.draft);
-      } catch (err) {
-        failure = err as Error & { code?: string; responseCode?: number; command?: string };
-      }
-
-      if (!failure) {
-        // Sent: from here on it must be logged before anything else goes out.
-        result.sent++;
-        if (!(await save({ ...base, kind: "SENT", subject: r.draft.subject, body: r.draft.text, messageId: r.draft.messageId, occurredAt: now().toISOString() }))) break;
-        failuresInARow = 0;
-        log(`${green("sent")} ${r.prospect.label} <${r.address}>  ${dim(`step ${r.step.step}`)}`);
-        emit({ type: "sent", label: r.prospect.label, address: r.address, step: r.step.step ?? 0 });
-      } else {
-        const kind = classifySmtpFailure(failure);
-        result.failed++;
-        failuresInARow++;
-        const detail = `${failure.code ?? ""} ${failure.message}`.trim().slice(0, 1000);
-        if (!(await save({ ...base, kind: kind === "recipient" ? "BOUNCED" : "FAILED", error: detail, occurredAt: now().toISOString() }))) break;
-        log(`${red(kind === "recipient" ? "rejected" : "failed")} ${r.prospect.label} <${r.address}>: ${failure.message}`);
-        emit({ type: "failed", label: r.prospect.label, address: r.address, step: r.step.step ?? 0, reason: failure.message, bounced: kind === "recipient" });
-        if (kind === "mailbox" || failuresInARow >= 3) {
-          stop(kind === "mailbox" ? `the mailbox stopped accepting mail (${failure.code ?? failure.command ?? "error"}: ${failure.message.slice(0, 120)})` : "three failures in a row");
-          break;
-        }
-      }
-
-      if (index < batch.length - 1) {
-        const min = email.minDelaySeconds * 1000;
-        const max = email.maxDelaySeconds * 1000;
-        const pause = Math.round(min + random() * (max - min));
-        emit({ type: "pause", seconds: Math.round(pause / 1000) });
-        await sleep(pause);
-      }
+/**
+ * Send a prepared batch from start to finish, waiting between emails: the
+ * terminal's send. Every email is logged before the next goes out. Each step
+ * is reported to `io` (the terminal) and `onEvent`.
+ */
+export async function sendEmails(prepared: PreparedEmailRun, options: SendOptions): Promise<EmailRunResult> {
+  const plan = toSendPlan(prepared);
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const log = (line = "") => options.io?.log(line);
+  const transport = options.transport ?? smtpTransport(plan.account);
+  const step: StepOptions = {
+    store: options.store,
+    transport,
+    verifier: options.verifier,
+    ignoreWindow: options.ignoreWindow,
+    now: options.now ?? (() => new Date()),
+    random: options.random ?? Math.random,
+    log,
+    emit: (event) => options.onEvent?.(event),
+    shouldStop: () => options.shouldStop?.() ?? false,
+  };
+  let state = newSendState();
+  try {
+    while (!state.done) {
+      const next = await sendStep(plan, state, step);
+      state = next.state;
+      if (!state.done && next.waitMs > 0) await sleep(next.waitMs);
     }
   } finally {
     transport.close?.();
   }
-
-  log(`\n${result.sent} sent, ${result.failed} failed${result.aborted ? `, stopped: ${result.aborted}` : ""}.`);
-  return result;
+  if (state.verified) log(`\n${state.sent} sent, ${state.failed} failed${state.aborted ? `, stopped: ${state.aborted}` : ""}.`);
+  return sendResult(state);
 }
 
 /**

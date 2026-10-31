@@ -14,11 +14,12 @@ export interface Access {
  *   approves, so other sites cannot call the API with your session.
  * - An Origin, when the browser sends one, must be this server's.
  *
- * /api/health is open to anyone, for a host's uptime checks.
+ * /api/health is open to anyone, for a host's uptime checks; /api/cron/
+ * carries its own secret instead (Vercel's cron calls it).
  */
 export function refuseRequest(request: Request, access: Access): string | undefined {
   const { pathname } = new URL(request.url);
-  if (pathname === "/api/health") return undefined;
+  if (pathname === "/api/health" || pathname.startsWith("/api/cron/")) return undefined;
   const host = request.headers.get("host") ?? "";
   if (!access.hosts.includes(host)) return `cold does not answer on ${host || "this address"}`;
   if (!pathname.startsWith("/api/")) return undefined;
