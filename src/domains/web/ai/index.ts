@@ -2,24 +2,31 @@ import { createHash } from "node:crypto";
 import {
   aiConfigured,
   aiModel,
+  ANGLES,
   draftMessage,
   explainError,
   findProspects,
   prepCall,
   researchProspect,
+  TONES,
   triageReply,
   type AiOffer,
   type AiProspect,
+  type AiProvider,
   type AiResult,
   type AiRun,
   type AiRunKind,
   type AiSender,
+  type AiStore,
+  type Angle,
   type FindResult,
   type Research,
+  type Tone,
   type Triage,
 } from "../../ai";
 import { callSheetData } from "../../call";
 import { getOffer, type Account, type ColdConfig, type Offer } from "../../config";
+import { allowedAngles } from "../../decide";
 import { prepareDmRun } from "../../dm";
 import { prepareEmailRun } from "../../email";
 import { findSequence } from "../../messages";
@@ -29,21 +36,22 @@ import { twentyClient } from "../../touches";
 import { HttpError, json, readBody, type Route } from "../api";
 import { keepAlive } from "../background";
 import { OWN_LIST, type WebContext } from "../context";
+import { chooseStyle, draftStyle, evidenceFor } from "../decide/engine";
 
-const offerOf = (offer?: Offer): AiOffer => ({
+export const offerOf = (offer?: Offer): AiOffer => ({
   audience: offer?.variables.audience,
   offer: offer?.variables.offer,
   outcome: offer?.variables.outcome,
   pain: offer?.variables.pain,
   proof: offer?.variables.proof,
 });
-const senderOf = (account: Account): AiSender & { phone?: string } => ({
+export const senderOf = (account: Account): AiSender & { phone?: string } => ({
   name: account.variables.sender_name ?? account.variables.sender_first_name,
   company: account.variables.sender_company,
   voice: account.voice,
   phone: account.variables.sender_phone,
 });
-const prospectOf = (p: Prospect): AiProspect => ({ name: p.label, ...p.variables });
+export const prospectOf = (p: Prospect): AiProspect => ({ name: p.label, ...p.variables });
 
 /** A CSV cell: quoted when it needs to be, and never read as a formula. */
 function cell(value: string | undefined): string {
@@ -55,12 +63,36 @@ const csvText = (headers: string[], rows: Array<Record<string, string | undefine
   [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h])).join(","))].join("\n") + "\n";
 
 /** The prospect sources the API accepts, as in the main API. */
-const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
+export const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
 /** Only http(s) links from research reach the page. */
 const httpOnly = (urls: string[] | undefined) => (urls ?? []).filter((u) => /^https?:\/\//i.test(u));
 
 const AI_COLUMNS = ["id", "first_name", "last_name", "title", "company", "email", "phone", "website", "city", "trigger", "linkedin_url", "instagram_handle", "facebook_url", "notes", "sources"];
 const host = (url?: string | null) => (url ? url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]!.toLowerCase() : "");
+
+/**
+ * Start a run and return at once; the work carries on and lands in the
+ * database, where the app picks it up from /api/ai/runs/:id. No request waits
+ * on a model, so no proxy in front (Railway's, Vercel's) can time one out.
+ */
+export async function startRun<T>(
+  ai: AiStore,
+  kind: AiRunKind,
+  subject: string | undefined,
+  input: unknown,
+  work: (runId: string) => Promise<AiResult<T> & { provider?: AiProvider }>,
+  provider: AiProvider = "claude",
+): Promise<string> {
+  const runId = await ai.start(kind, subject, input, provider);
+  keepAlive(
+    Promise.resolve()
+      .then(() => work(runId))
+      .then((result) => ai.finish(runId, result))
+      .catch((err) => ai.fail(runId, explainError(err).message))
+      .catch((err) => console.error(`AI run ${runId} could not be saved:`, err)),
+  );
+  return runId;
+}
 
 /**
  * The AI routes, all behind the login. Every request to Claude runs in the
@@ -75,23 +107,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
     return ctx.ai;
   };
 
-  /**
-   * Start a run and return at once; the work carries on and lands in the
-   * database, where the app picks it up from /api/ai/runs/:id. No request waits
-   * on Claude, so no proxy in front (Railway's, Vercel's) can time one out.
-   */
-  async function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: (runId: string) => Promise<AiResult<T>>): Promise<string> {
-    const ai = store();
-    const runId = await ai.start(kind, subject, input);
-    keepAlive(
-      Promise.resolve()
-        .then(() => work(runId))
-        .then((result) => ai.finish(runId, result))
-        .catch((err) => ai.fail(runId, explainError(err).message))
-        .catch((err) => console.error(`AI run ${runId} could not be saved:`, err)),
-    );
-    return runId;
-  }
+  const background = <T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: (runId: string) => Promise<AiResult<T>>) => startRun(store(), kind, subject, input, work);
 
   async function config(): Promise<ColdConfig> {
     const { config: c, error } = await ctx.config();
@@ -132,12 +148,13 @@ export function aiRoutes(ctx: WebContext): Route[] {
         : (await prepareDmRun({ sequence, account, offer, prospects, store: touchStore, now: () => ctx.now() })).plan;
     const item = plan.due.find((d) => d.prospect.key === prospectKey);
     if (!item) throw new HttpError(409, "This prospect has nothing due right now.");
-    const found = await research(item.prospect.key);
+    const { dossier, research: found } = await evidenceFor(ctx, item.prospect.key);
     const variables = buildVariables(account, offer, item.prospect);
-    // A researched trigger fills an empty {{trigger}}, so the template has its one true personal line.
-    if (!variables.trigger && found?.best_trigger) variables.trigger = found.best_trigger;
+    // A researched (or diligence) trigger fills an empty {{trigger}}, so the template has its one true personal line.
+    const trigger = found?.best_trigger ?? dossier?.triggers[0]?.sentence;
+    if (!variables.trigger && trigger) variables.trigger = trigger;
     const rendered = renderForProspect(item.step, variables, item.prospect.key);
-    return { campaign, sequence, account, offer, item, rendered, research: found };
+    return { config: c, campaign, sequence, account, offer, item, rendered, research: found, dossier };
   }
 
   return [
@@ -300,12 +317,18 @@ export function aiRoutes(ctx: WebContext): Route[] {
       "POST",
       /^\/api\/ai\/draft$/,
       async (request) => {
-        const body = await readBody<{ campaignId: string; prospect: string }>(request);
+        const body = await readBody<{ campaignId: string; prospect: string; tone?: string; angle?: string }>(request);
+        if (body.tone && !(TONES as readonly string[]).includes(body.tone)) throw new HttpError(400, `Tone is one of ${TONES.join(", ")}.`);
+        if (body.angle && !(ANGLES as readonly string[]).includes(body.angle)) throw new HttpError(400, `Opening is one of ${ANGLES.join(", ")}.`);
         const due = await dueMessage(body.campaignId, body.prospect);
         const { campaign, sequence, account, offer, item, rendered } = due;
         const call = ctx.claude();
         const step = item.step.step ?? 1;
-        const runId = await background("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, async (id) => {
+        // The style: yours if you picked one, else the decision engine's pick for this person, now and then something else to learn from.
+        const channel = sequence.channel === "email" ? "email" : (sequence.platform ?? "dm");
+        const angles = allowedAngles({ offer: offerOf(offer), prospect: item.prospect, dossier: due.dossier, research: due.research });
+        const { pick, decision, segment } = await chooseStyle(ctx, { config: due.config, campaign, channel, prospect: item.prospect, allowedAngles: angles, tone: body.tone as Tone | undefined, angle: body.angle as Angle | undefined });
+        const runId = await background("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step, tone: pick.tone, angle: pick.angle }, async (id) => {
           const result = await draftMessage({
             call,
             channel: sequence.channel === "email" ? "email" : "dm",
@@ -316,10 +339,26 @@ export function aiRoutes(ctx: WebContext): Route[] {
             template: { subject: rendered.subject, body: rendered.body },
             maxChars: item.step.maxChars,
             threaded: sequence.channel === "email" && !item.first,
+            style: draftStyle(pick, decision, due.dossier),
           });
           const out = result.output;
           const draft = await store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: out.subject ?? rendered.subject, body: out.body, status: "draft", runId: id });
-          return { ...result, output: { draft, changes: out.changes, personalLine: out.personal_line, template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing }, researched: !!due.research } };
+          // What it learns from: the draft is still good if this can't be saved.
+          await ctx.decisions
+            ?.assign({ campaignId: campaign.id, prospectKey: item.prospect.key, step, sequence: sequence.id, segment, tone: pick.tone, angle: pick.angle, pickedBy: pick.pickedBy, score: decision?.score, tier: decision?.tier })
+            .catch((err) => console.error("Could not record the draft's style:", err));
+          return {
+            ...result,
+            output: {
+              draft,
+              changes: out.changes,
+              personalLine: out.personal_line,
+              template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing },
+              researched: !!(due.research || due.dossier),
+              style: { tone: pick.tone, angle: pick.angle, pickedBy: pick.pickedBy, why: pick.why },
+              score: decision ? { score: decision.score, tier: decision.tier } : undefined,
+            },
+          };
         });
         return json({ runId }, 202);
       },
@@ -339,7 +378,11 @@ export function aiRoutes(ctx: WebContext): Route[] {
         if (!text) throw new HttpError(400, "The message is empty.");
         if (/\{\{|\}\}/.test(`${body.subject ?? ""} ${text}`)) throw new HttpError(400, "The message still has a {{variable}} in it. Replace it with real words.");
         if (body.status !== "draft" && body.status !== "approved") throw new HttpError(400, "Status is draft or approved.");
-        return json(await store().saveDraft({ campaignId: body.campaignId, prospectKey: body.prospect, step: Number(body.step) || 1, subject: body.subject?.trim() || undefined, body: text, status: body.status }));
+        const step = Number(body.step) || 1;
+        const saved = await store().saveDraft({ campaignId: body.campaignId, prospectKey: body.prospect, step, subject: body.subject?.trim() || undefined, body: text, status: body.status });
+        // Only an approved draft goes out, so only then does its style count for learning.
+        await ctx.decisions?.approve(body.campaignId, body.prospect, step, body.status === "approved");
+        return json(saved);
       },
     ],
     [
@@ -347,7 +390,9 @@ export function aiRoutes(ctx: WebContext): Route[] {
       /^\/api\/ai\/drafts$/,
       async (_request, _params, url) => {
         const p = url.searchParams;
-        return json({ ok: await store().deleteDraft(p.get("campaignId") ?? "", p.get("prospect") ?? "", Number(p.get("step")) || 1) });
+        const [campaignId, prospect, step] = [p.get("campaignId") ?? "", p.get("prospect") ?? "", Number(p.get("step")) || 1];
+        await ctx.decisions?.unassign(campaignId, prospect, step);
+        return json({ ok: await store().deleteDraft(campaignId, prospect, step) });
       },
     ],
     [

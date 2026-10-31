@@ -1,6 +1,6 @@
 import { PLATFORMS, VOICES, type Platform, type Voice } from "../../messages";
 import { VARIABLES } from "../../render";
-import { WEEKDAYS, type Account, type ColdConfig, type DmSettings, type EmailSettings, type Offer, type SendWindow, type StoreKind, type Weekday } from "../types";
+import { DEFAULT_DECIDE, WEEKDAYS, type Account, type ColdConfig, type DecideSettings, type DmSettings, type EmailSettings, type Offer, type SendWindow, type StoreKind, type Weekday } from "../types";
 
 const ACCOUNT_VARIABLES = new Set(VARIABLES.filter((v) => v.scope === "account").map((v) => v.name));
 const OFFER_VARIABLES = new Set(VARIABLES.filter((v) => v.scope === "offer").map((v) => v.name));
@@ -55,9 +55,11 @@ export function parseConfig(raw: unknown, file: string, isExample = false): { co
   const store = (text(raw.store) || "auto") as StoreKind;
   if (!["auto", "twenty", "file"].includes(store)) errors.push("store: must be auto, twenty or file");
 
+  const decide = parseDecide(raw.decide, errors);
+
   if (errors.length) return { errors };
   return {
-    config: { file, isExample, accounts, offers, defaultOffer, store, logFile: text(raw.log_file) || ".cold/touches.jsonl" },
+    config: { file, isExample, accounts, offers, defaultOffer, store, logFile: text(raw.log_file) || ".cold/touches.jsonl", decide },
     errors,
   };
 }
@@ -163,4 +165,23 @@ function isTimezone(name: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The optional decide: section. Every key has a default, so it can be left out entirely. */
+function parseDecide(raw: unknown, errors: string[]): DecideSettings {
+  if (raw === undefined || raw === null) return { ...DEFAULT_DECIDE };
+  if (!isObject(raw)) {
+    errors.push("decide: must be a mapping (provider, diligence, review_below, explore)");
+    return { ...DEFAULT_DECIDE };
+  }
+  const known = new Set(["provider", "diligence", "review_below", "explore"]);
+  for (const key of Object.keys(raw)) if (!known.has(key)) errors.push(`decide.${key}: not a decide setting (${[...known].join(", ")})`);
+  const provider = (text(raw.provider) || DEFAULT_DECIDE.provider) as DecideSettings["provider"];
+  if (!["auto", "jev", "claude"].includes(provider)) errors.push("decide.provider: must be auto, jev or claude");
+  const diligence = (text(raw.diligence) || DEFAULT_DECIDE.diligence) as DecideSettings["diligence"];
+  if (!["auto", "subq", "claude"].includes(diligence)) errors.push("decide.diligence: must be auto, subq or claude");
+  const reviewBelow = raw.review_below === undefined ? DEFAULT_DECIDE.reviewBelow : Number(raw.review_below);
+  if (!Number.isFinite(reviewBelow) || reviewBelow < 0 || reviewBelow > 1) errors.push("decide.review_below: must be a number from 0 to 1, e.g. 0.75");
+  if (raw.explore !== undefined && typeof raw.explore !== "boolean") errors.push("decide.explore: must be true or false");
+  return { provider, diligence, reviewBelow: Number.isFinite(reviewBelow) ? reviewBelow : DEFAULT_DECIDE.reviewBelow, explore: raw.explore === undefined ? DEFAULT_DECIDE.explore : raw.explore === true };
 }

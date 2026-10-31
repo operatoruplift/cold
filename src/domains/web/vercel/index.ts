@@ -4,6 +4,7 @@ import { seedMessagesInto } from "../../messages";
 import { DbFiles, DbSecrets, secretKey } from "../../storage";
 import { Waitlist } from "../../waitlist";
 import { aiRoutes } from "../ai";
+import { decideRoutes } from "../decide";
 import { createApi } from "../api";
 import { invocationDeadline } from "../background";
 import { WebContext } from "../context";
@@ -38,7 +39,7 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     version: (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "dev").slice(0, 12),
     auth,
     waitlist: new Waitlist(db),
-    privateApi: createApi(ctx, aiRoutes(ctx)),
+    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx)]),
     setup,
     // Vercel sets X-Forwarded-For to the visitor's address itself.
     clientIp: clientAddress(settings.proxyHops, () => undefined),

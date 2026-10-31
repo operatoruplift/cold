@@ -186,6 +186,40 @@ const MIGRATIONS: string[] = [
      event TEXT NOT NULL,
      PRIMARY KEY (job_id, seq)
    );`,
+  // The decision engine: each prospect's latest decision per offer, and every
+  // message written in a chosen style with what became of it, to learn from.
+  `ALTER TABLE ai_runs ADD COLUMN provider TEXT;
+   CREATE TABLE decisions (
+     prospect_key TEXT NOT NULL,
+     offer TEXT NOT NULL,
+     run_id TEXT,
+     score INTEGER NOT NULL,
+     tier TEXT NOT NULL,
+     action TEXT NOT NULL,
+     review INTEGER NOT NULL,
+     decision TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (prospect_key, offer)
+   );
+   CREATE TABLE style_assignments (
+     campaign_id TEXT NOT NULL,
+     prospect_key TEXT NOT NULL,
+     step INTEGER NOT NULL,
+     sequence TEXT NOT NULL,
+     segment TEXT NOT NULL,
+     tone TEXT NOT NULL,
+     angle TEXT NOT NULL,
+     picked_by TEXT NOT NULL,
+     score INTEGER,
+     tier TEXT,
+     approved_at TEXT,
+     sent_at TEXT,
+     outcome TEXT,
+     resolved_at TEXT,
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (campaign_id, prospect_key, step)
+   );
+   CREATE INDEX style_assignments_open ON style_assignments (approved_at, outcome);`,
 ];
 
 const statements = (script: string): Statement[] =>

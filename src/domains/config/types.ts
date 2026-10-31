@@ -54,6 +54,20 @@ export interface Offer {
 
 export type StoreKind = "auto" | "twenty" | "file";
 
+/** How the decision engine runs: who decides, who does diligence, when you check, whether it explores. */
+export interface DecideSettings {
+  /** auto: Jev when TYPESAFE_API_KEY is set, else Claude. */
+  provider: "auto" | "jev" | "claude";
+  /** auto: SubQ when SUBQ_API_KEY is set, else Claude. */
+  diligence: "auto" | "subq" | "claude";
+  /** A next step less sure than this goes to you to check. */
+  reviewBelow: number;
+  /** Now and then try another tone or opening than the model's pick, to learn what gets replies. */
+  explore: boolean;
+}
+
+export const DEFAULT_DECIDE: DecideSettings = { provider: "auto", diligence: "auto", reviewBelow: 0.75, explore: true };
+
 export interface ColdConfig {
   /** The file it was read from. */
   file: string;
@@ -65,4 +79,5 @@ export interface ColdConfig {
   store: StoreKind;
   /** The touch log when the store is a file. */
   logFile: string;
+  decide: DecideSettings;
 }

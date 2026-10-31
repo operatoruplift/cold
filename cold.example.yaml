@@ -97,3 +97,10 @@ default_offer: booking-pages
 # Where touches are logged: auto (Twenty when TWENTY_BASE_URL and
 # TWENTY_API_KEY are set, otherwise .cold/touches.jsonl), twenty, or file.
 store: auto
+
+# The decision engine (docs/decision-engine.md). Every line is optional.
+# decide:
+#   provider: auto      # who scores: auto (Jev with TYPESAFE_API_KEY, else Claude), jev, claude
+#   diligence: auto     # who reads sites: auto (SubQ with SUBQ_API_KEY, else Claude), subq, claude
+#   review_below: 0.75  # a next step less sure than this is flagged for you to check
+#   explore: true       # now and then try another tone or opening, to learn what gets replies

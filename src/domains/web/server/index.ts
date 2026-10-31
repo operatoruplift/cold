@@ -19,6 +19,7 @@ import { systemDesktop } from "../../dm";
 import { seedMessages } from "../../messages";
 import { Waitlist } from "../../waitlist";
 import { aiRoutes } from "../ai";
+import { decideRoutes } from "../decide";
 import { createApi } from "../api";
 import { WebContext } from "../context";
 import { buildAssets, bundle, DIST, readBundle } from "./assets";
@@ -58,7 +59,7 @@ const handler = createHandler({
   version: assets.version,
   auth,
   waitlist,
-  privateApi: createApi(ctx, aiRoutes(ctx)),
+  privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx)]),
   setup,
   clientIp: clientAddress(settings.proxyHops, (request) => server.requestIP(request)?.address),
 });

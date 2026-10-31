@@ -66,5 +66,6 @@ function clean(input: CampaignInput): CampaignInput {
     offer: input.offer?.trim() || undefined,
     source: input.source.trim(),
     where: input.where?.trim() || undefined,
+    order: input.order === "score" ? "score" : undefined,
   };
 }

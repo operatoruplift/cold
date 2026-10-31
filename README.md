@@ -220,6 +220,32 @@ shows the last 30 days. Requests use Claude's server-side fallback, so one the
 model declines for policy reasons is retried on Anthropic's recommended
 fallback model.
 
+### The decision engine
+
+**Prospects, Score and prioritize** ranks a list by how likely each prospect
+is to buy, and says how to write to them:
+
+- **Diligence** reads each prospect's public site (safely, within robots.txt)
+  for what they need, with the words on their pages that show it. With a SubQ
+  key (`SUBQ_API_KEY`), Subquadratic's long-context model reads every page in
+  one pass; otherwise Claude does, with a few web searches of its own.
+- **Scoring** asks a decision model ten typed questions (fit, need, timing,
+  who decides, can they pay, tone, opening, objection, channel, next step).
+  With a TypeSafe key (`TYPESAFE_API_KEY`) that is Jev, TypeSafe's System One
+  model; otherwise Claude. The answers become a 0 to 100 score, a tier, a next
+  step and the reasons; an unsure call is flagged for you to check.
+- **Drafts** are written in the tone and opening picked for that person,
+  around their need. You can pick your own.
+- **Campaigns** can send to the highest scores first when the daily cap
+  can't reach everyone.
+- **It learns.** Each approved draft's tone and opening is matched to what
+  happened (a reply, a no, silence for two weeks), and Thompson sampling
+  shifts later picks toward what gets answered. **Stats, What's working**
+  shows the reply rate of each, with how sure it is.
+
+How it works, the data it sends where, and the roadmap to selling it to other
+businesses as a service: [docs/decision-engine.md](docs/decision-engine.md).
+
 ## Run your own
 
 You need [Bun](https://bun.sh). Twenty is optional: without it the touch log is
@@ -506,8 +532,9 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 | Where | What |
 |---|---|
 | `cold.yaml` | Accounts (voice, sender details, mailbox settings, caps, sending window) and offers. Start from `cold.example.yaml`. |
-| `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, `ANTHROPIC_API_KEY`, optional `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`, or set them in Settings. |
-| `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts, and email sends (SQLite). |
+| `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, `ANTHROPIC_API_KEY`, optional `TYPESAFE_API_KEY` (Jev), `SUBQ_API_KEY` (SubQ), `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`, or set them in Settings. |
+| `cold.yaml`, `decide:` | Who decides and who does diligence (`auto`, or pin one), when a call goes to you to check, and whether styles are explored. See [docs/decision-engine.md](docs/decision-engine.md). |
+| `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts, decisions and what the engine learned, and email sends (SQLite). |
 | `COLD_DATABASE_URL`, `COLD_DATABASE_TOKEN` | Use a Turso (libSQL) database instead; the Turso integration on Vercel sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which work too. There your files, the touch log and saved keys live in it as well. |
 | `COLD_SECRET_KEY` | On a database: encrypts the keys and passwords saved in Settings. |
 | `COLD_CONFIG` | Point at a config file somewhere else. |
@@ -529,10 +556,11 @@ src/
   web/                    the app: React pages, bundled by Bun, and its service worker
   ui/                     the font, shared by both
   domains/
-    web/                  the server: site, app and API, login gate, AI routes, campaigns, send jobs
+    web/                  the server: site, app and API, login gate, AI and engine routes, campaigns, send jobs
     auth/                 the owner login: argon2id, sessions, rate limits, setup codes
     waitlist/             signups from the site
-    ai/                   Claude: finding and researching prospects, drafts, call prep, triage
+    ai/                   Claude: finding and researching prospects, drafts in a tone, call prep, triage
+    decide/               the decision engine: diligence, Jev, SubQ, scores, learning
     db/                   the database (a SQLite file, or Turso) and its migrations
     storage/              your files and saved keys: a folder, or the database
     messages/             load and lint the library
@@ -547,7 +575,7 @@ src/
     stats/                reply rates
     twenty/               the API client and the schema
     cli/                  terminal input and output
-docs/                     playbook, compliance, deploy, brand
+docs/                     playbook, compliance, deploy, brand, the decision engine
 examples/prospects.csv    five fictional prospects
 ```
 

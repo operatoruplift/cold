@@ -42,6 +42,19 @@ repository (Security, Advisories), not in a public issue.
 - **AI never sends.** Research and drafts are suggestions: an email only goes
   out through a campaign send you start, with your caps, window and opt-outs;
   DMs and calls are always yours.
+- **Diligence reads only the public internet.** A prospect's website comes
+  from a list anyone could have written, so before COLD reads it, every
+  address the name resolves to must be public (private, loopback, link-local,
+  carrier and reserved ranges are refused, IPv4 and IPv6, in every spelling),
+  each redirect is checked again, only `http` and `https` on the normal ports
+  are read, and every page has a time and size limit. It honours robots.txt.
+  A name that resolves to a public address when checked and a private one when
+  fetched (DNS rebinding) is not fully ruled out; on a server with sensitive
+  internal services, run diligence where they aren't reachable.
+- **Decision models get no contact details.** Jev or Claude see the list row
+  without email addresses, phone numbers or record ids. The TypeSafe and SubQ
+  keys are billed to you, like the Anthropic key; Settings and the Score tab
+  show usage per provider.
 - **Prospect lists are personal data.** `prospects*.csv` is gitignored; the
   only CSV in the repository is the fictional example. The waitlist keeps a
   salted hash of each signup's address, never the address itself.

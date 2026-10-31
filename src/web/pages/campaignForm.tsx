@@ -20,6 +20,7 @@ export function CampaignForm({ campaign, source, onClose, onSaved }: { campaign?
     offer: campaign?.offer ?? status.data?.defaultOffer,
     source: campaign?.source ?? source ?? "csv:examples/prospects.csv",
     where: campaign?.where,
+    order: campaign?.order,
   });
   const [error, setError] = useState<ApiError>();
   const [saving, setSaving] = useState(false);
@@ -147,6 +148,12 @@ export function CampaignForm({ campaign, source, onClose, onSaved }: { campaign?
             <input className="input" value={form.where ?? ""} onChange={(e) => set({ where: e.target.value })} placeholder="field[eq]:value" />
           </Field>
         )}
+        <Field label="Who goes first" hint="When the daily cap can't reach everyone due, highest score first gives today's sends to the prospects most likely to buy. Score them under Prospects.">
+          <select className="select" value={form.order ?? "list"} onChange={(e) => set({ order: e.target.value === "score" ? "score" : undefined })}>
+            <option value="list">The list's order</option>
+            <option value="score">Highest score first</option>
+          </select>
+        </Field>
       </div>
     </Modal>
   );

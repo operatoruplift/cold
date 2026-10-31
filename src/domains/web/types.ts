@@ -2,8 +2,11 @@
  * The JSON the local UI's API speaks. Types only: the browser imports this
  * file with `import type`, so nothing here may be a runtime value.
  */
+import type { AiProvider, Angle, Tone } from "../ai";
 import type { Owner, SessionInfo } from "../auth";
 import type { CallSheet } from "../call";
+import type { DecideSettings } from "../config";
+import type { Action, Decision, Dossier, PickedBy, StyleInsights, Tier } from "../decide";
 import type { EmailEvent, EmailRunResult } from "../email";
 import type { LintIssue, Platform, Voice } from "../messages";
 import type { ApplyReport } from "../twenty";
@@ -22,6 +25,8 @@ export interface Campaign {
   source: string;
   /** A Twenty REST filter, for Twenty sources. */
   where?: string;
+  /** Who goes first when the daily cap can't reach everyone: the list's order, or the highest score. */
+  order?: "list" | "score";
   createdAt: string;
 }
 
@@ -125,6 +130,10 @@ export interface PlanRow {
   dueOn?: string;
   /** An approved AI draft goes out instead of the template. */
   custom?: boolean;
+  /** The decision engine's latest call on them, for the campaign's offer. */
+  score?: number;
+  tier?: Tier;
+  action?: Action;
 }
 
 export interface PlanResponse {
@@ -220,3 +229,51 @@ export interface AiStatusResponse {
   usage?: { runs: number; inputTokens: number; outputTokens: number; searches: number };
   finds: Array<{ id: string; status: "running" | "done" | "failed"; input: { area?: string; count?: number; offer?: string }; createdAt: string; found: number; error?: string }>;
 }
+
+/* ---------------------------------------------------------------- the decision engine */
+
+export interface DecideStatusResponse {
+  settings: DecideSettings;
+  /** Who decides and who does diligence right now, or why they can't. */
+  decide: { provider: "jev" | "claude" | null; model?: string; error?: string };
+  diligence: { provider: "subq" | "claude" | null; model?: string; error?: string };
+  keys: { typesafe: boolean; subq: boolean; anthropic: boolean };
+  counts: { decisions: number; assignments: number };
+  usage: Array<{ provider: AiProvider; runs: number; inputTokens: number; outputTokens: number }>;
+}
+
+/** A prospect's decision, short, for a list. */
+export interface ScoreSummary {
+  score: number;
+  tier: Tier;
+  action: Action;
+  review: boolean;
+  tone: Tone;
+  angle: Angle;
+  need?: string;
+  evidence: Decision["evidence"];
+  provider: Decision["provider"];
+  decidedAt: string;
+}
+
+export interface ScoresResponse {
+  offer: string;
+  scores: Record<string, ScoreSummary>;
+  /** When each prospect's diligence was done. */
+  diligence: Record<string, string>;
+}
+
+export interface ProspectDecisionResponse {
+  decision?: Decision;
+  dossier?: Dossier;
+  dossierAt?: string;
+}
+
+export interface StyleChoice {
+  tone: Tone;
+  angle: Angle;
+  pickedBy: PickedBy;
+  why: string;
+}
+
+export type InsightsResponse = StyleInsights;

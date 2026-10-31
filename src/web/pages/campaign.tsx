@@ -8,6 +8,7 @@ import { api, ApiError, useApi } from "../lib/api";
 import { channelLabel, day, plural, sequenceName, sourceLabel, voiceLabel } from "../lib/format";
 import { Button, Card, Empty, ErrorNotice, initials, Loading, Modal, Notice, PageHeader, Pill, Stat, Tabs } from "../ui/kit";
 import { AiDraft } from "../ui/aiDraft";
+import { ScoreCell } from "../ui/decide";
 import { useToast } from "../ui/toast";
 import { CampaignForm } from "./campaignForm";
 
@@ -548,8 +549,8 @@ function PlanTabs({ plan, campaign, drafts, onChanged }: { plan: PlanResponse; c
                     <tr className={expandable ? "clickable" : undefined} onClick={() => expandable && setOpen(isOpen ? null : r.key)}>
                       <td style={{ width: 28 }}>{expandable ? isOpen ? <ChevronDown size={15} className="text-3" /> : <ChevronRight size={15} className="text-3" /> : null}</td>
                       <td>
-                        <div className="strong">
-                          {r.label} {r.custom && <span className="ai-badge">AI draft approved</span>}
+                        <div className="strong row wrap" style={{ gap: 6 }}>
+                          {r.label} {r.score !== undefined && r.tier && <ScoreCell score={r.score} tier={r.tier} compact />} {r.custom && <span className="ai-badge">AI draft approved</span>}
                         </div>
                         {r.address && <div className="muted truncate" style={{ maxWidth: 360 }}>{r.address}</div>}
                       </td>

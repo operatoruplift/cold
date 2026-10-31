@@ -1,4 +1,5 @@
 import { askStructured, askWithResearch, hostOf, normalizeUrl, type AiResult, type MessagesCall } from "./claude";
+import { ANGLE_GUIDE, TONE_GUIDE, type DraftStyle } from "./style";
 
 /** Who you sell to and what you offer: the cold.yaml offer, plus who is writing. */
 export interface AiOffer {
@@ -16,18 +17,21 @@ export interface AiSender {
 /** What COLD knows about one prospect: its template variables, flattened. */
 export type AiProspect = Record<string, string>;
 
-const tag = (name: string, value: string | undefined) => (value?.trim() ? `<${name}>${value.trim()}</${name}>\n` : "");
-const offerBlock = (o: AiOffer) => tag("who_i_sell_to", o.audience) + tag("what_i_offer", o.offer) + tag("the_outcome", o.outcome) + tag("the_pain_it_removes", o.pain) + tag("proof", o.proof);
-const prospectBlock = (p: AiProspect) =>
+/** One XML-tagged line of a prompt, or nothing when the value is empty. */
+export const tag = (name: string, value: string | undefined) => (value?.trim() ? `<${name}>${value.trim()}</${name}>\n` : "");
+/** The seller's offer, as every prompt gives it. */
+export const offerBlock = (o: AiOffer) => tag("who_i_sell_to", o.audience) + tag("what_i_offer", o.offer) + tag("the_outcome", o.outcome) + tag("the_pain_it_removes", o.pain) + tag("proof", o.proof);
+/** What the list says about a prospect, one "name: value" per line. */
+export const prospectBlock = (p: AiProspect) =>
   Object.entries(p)
     .filter(([, v]) => v?.trim())
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
 /** Links from the web reach the page only as http(s), never javascript: or data:. */
-const isHttp = (url: string) => /^https?:\/\/[^\s]+$/i.test(url.trim());
+export const isHttp = (url: string) => /^https?:\/\/[^\s]+$/i.test(url.trim());
 
-const nullable = (description?: string) => ({ type: ["string", "null"], ...(description ? { description } : {}) });
+export const nullable = (description?: string) => ({ type: ["string", "null"], ...(description ? { description } : {}) });
 
 /* ---------------------------------------------------------------- Find prospects */
 
@@ -225,7 +229,9 @@ const DRAFT_SYSTEM = `You personalize one cold message for COLD. You get the mes
 
 Rules:
 - Keep it the same message: same purpose, same offer, same ask, same voice, about the same length. Don't add links, attachments, prices, or promises the original doesn't make.
-- Use only facts from <prospect> and <research>. If nothing specific is known, keep the template's wording rather than invent a detail.
+- When <tone> is given, write in that register, as its guide says. When <angle> is given, open the way its guide says; if the facts it needs aren't known, keep the template's opening. Tone and angle change how it reads, never what it offers or asks.
+- When <their_needs> is given, connect the offer to the one that fits best, in plain words. When <likely_objection> is given, answer it in one short clause, and only if it fits naturally.
+- Use only facts from <prospect>, <research> and <their_needs>. If nothing specific is known, keep the template's wording rather than invent a detail.
 - At most one personal line, and it must be true. No flattery, no "I hope this finds you well", no fake familiarity ("as we discussed").
 - Plain text. Keep the greeting and sign-off style of the original. Never add the opt-out footer; COLD adds it.
 - Stay under the character limit when one is given.
@@ -239,7 +245,7 @@ const DRAFT_SCHEMA = {
     subject: nullable("The subject line, or null for a DM or a follow-up in the same thread."),
     body: { type: "string" },
     personal_line: nullable("The sentence you added or changed for this person, if any."),
-    changes: { type: "string", description: "One sentence for the sender: what you changed and why." },
+    changes: { type: "string", description: "One sentence for the sender: what you changed and why, including the tone and opening when they were given." },
   },
 };
 
@@ -253,8 +259,11 @@ export async function draftMessage(input: {
   template: { subject?: string; body: string };
   maxChars?: number;
   threaded?: boolean;
+  /** The tone and angle to write in, and what they need: from the decision engine, or picked by you. */
+  style?: DraftStyle;
   model?: string;
 }): Promise<AiResult<Draft>> {
+  const style = input.style;
   const research = input.research
     ? `<research>\n${input.research.summary}\nTriggers:\n${input.research.triggers.map((t) => `- ${t.sentence}${t.when ? ` (${t.when})` : ""}`).join("\n")}\nTalking points:\n${input.research.talking_points.map((t) => `- ${t}`).join("\n")}\n</research>\n`
     : "";
@@ -265,6 +274,10 @@ export async function draftMessage(input: {
     offerBlock(input.offer) +
     `<prospect>\n${prospectBlock(input.prospect)}\n</prospect>\n` +
     research +
+    tag("tone", style ? `${style.tone}: ${TONE_GUIDE[style.tone].write}` : undefined) +
+    tag("angle", style ? `${style.angle}: ${ANGLE_GUIDE[style.angle].write}` : undefined) +
+    tag("their_needs", style?.needs?.length ? style.needs.slice(0, 3).map((n) => `- ${n}`).join("\n") : undefined) +
+    tag("likely_objection", style?.objection) +
     tag("character_limit", input.maxChars ? String(input.maxChars) : undefined) +
     `<template_message>\n${input.template.subject ? `Subject: ${input.template.subject}\n\n` : ""}${input.template.body}\n</template_message>\n\nPersonalize this message.`;
   const result = await askStructured<Draft>({ call: input.call, model: input.model, system: DRAFT_SYSTEM, prompt, effort: "medium", maxTokens: 16000, schema: DRAFT_SCHEMA });

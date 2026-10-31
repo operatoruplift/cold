@@ -1,9 +1,10 @@
 import { Check, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AiDraftRecord } from "../../domains/ai/store";
-import type { PlanRow } from "../../domains/web/types";
+import type { PlanRow, StyleChoice } from "../../domains/web/types";
 import { runAndWait } from "../lib/ai";
 import { api, ApiError } from "../lib/api";
+import { ANGLE_LABEL, ANGLES, TONE_LABEL, TONES } from "../lib/decide";
 import { Button, ErrorNotice } from "./kit";
 import { useToast } from "./toast";
 
@@ -12,6 +13,31 @@ interface DraftAnswer {
   changes: string;
   personalLine: string | null;
   researched: boolean;
+  style?: StyleChoice;
+}
+
+/** Tone and opening for the next draft: Auto lets the decision engine pick for this person. */
+function StylePicker({ tone, angle, onTone, onAngle }: { tone: string; angle: string; onTone: (t: string) => void; onAngle: (a: string) => void }) {
+  return (
+    <span className="row" style={{ gap: 6 }}>
+      <select className="select sm" value={tone} onChange={(e) => onTone(e.target.value)} aria-label="Tone">
+        <option value="">Tone: auto</option>
+        {TONES.map((t) => (
+          <option key={t} value={t}>
+            {TONE_LABEL[t]}
+          </option>
+        ))}
+      </select>
+      <select className="select sm" value={angle} onChange={(e) => onAngle(e.target.value)} aria-label="Opening">
+        <option value="">Opening: auto</option>
+        {ANGLES.map((a) => (
+          <option key={a} value={a}>
+            {ANGLE_LABEL[a]}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
 }
 
 /**
@@ -27,6 +53,8 @@ export function AiDraft({ campaignId, row, channel, existing, onChanged }: { cam
   const [note, setNote] = useState<string>();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<ApiError>();
+  const [tone, setTone] = useState("");
+  const [angle, setAngle] = useState("");
   const step = row.step ?? 1;
   const showSubject = channel === "email" && step === 1;
 
@@ -40,12 +68,13 @@ export function AiDraft({ campaignId, row, channel, existing, onChanged }: { cam
     setBusy("ai");
     setError(undefined);
     try {
-      const run = await runAndWait<DraftAnswer>(() => api<{ runId: string }>("/api/ai/draft", { method: "POST", body: { campaignId, prospect: row.key } }));
+      const run = await runAndWait<DraftAnswer>(() => api<{ runId: string }>("/api/ai/draft", { method: "POST", body: { campaignId, prospect: row.key, tone: tone || undefined, angle: angle || undefined } }));
       const answer = run.output!;
       setDraft(answer.draft);
       setSubject(answer.draft.subject ?? "");
       setBody(answer.draft.body);
-      setNote(`${answer.changes}${answer.researched ? "" : " No research yet for this prospect, so only what's on the list was used."}`);
+      const style = answer.style ? `${TONE_LABEL[answer.style.tone]}, opening with ${ANGLE_LABEL[answer.style.angle].toLowerCase()}: ${answer.style.why} ` : "";
+      setNote(`${style}${answer.changes}${answer.researched ? "" : " No research yet for this prospect, so only what's on the list was used."}`);
       onChanged();
     } catch (err) {
       setError(err as ApiError);
@@ -89,10 +118,11 @@ export function AiDraft({ campaignId, row, channel, existing, onChanged }: { cam
   if (!draft)
     return (
       <div className="row wrap" style={{ marginTop: 10 }}>
+        <StylePicker tone={tone} angle={angle} onTone={setTone} onAngle={setAngle} />
         <Button size="sm" variant="ai" icon={Sparkles} loading={busy === "ai"} onClick={personalize}>
           Personalize with AI
         </Button>
-        <span className="hint">Claude rewrites this one message for {row.label}, from what's known about them. You approve it before it's used.</span>
+        <span className="hint">Claude rewrites this one message for {row.label}, in the tone most likely to get a reply from them. You approve it before it's used.</span>
         <ErrorNotice error={error} title="No draft" />
       </div>
     );
@@ -105,7 +135,8 @@ export function AiDraft({ campaignId, row, channel, existing, onChanged }: { cam
         <span className="ai-badge">
           <Sparkles size={12} /> {approved && !dirty ? "Approved: this goes out instead of the template" : "AI draft: not used until you approve it"}
         </span>
-        <span className="row" style={{ gap: 6 }}>
+        <span className="row wrap" style={{ gap: 6 }}>
+          <StylePicker tone={tone} angle={angle} onTone={setTone} onAngle={setAngle} />
           <Button size="sm" variant="ghost" icon={RotateCcw} loading={busy === "ai"} onClick={personalize}>
             Rewrite
           </Button>

@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { AiStore, claudeCall, type MessagesCall } from "../../ai";
-import { APP_ROOT, configFromText, type Account, type ColdConfig } from "../../config";
+import { AiError, AiStore, aiConfigured, claudeCall, type MessagesCall } from "../../ai";
+import { APP_ROOT, configFromText, type Account, type ColdConfig, type DecideSettings } from "../../config";
 import type { Db } from "../../db";
+import { claudeDecider, DecideStore, jevConfigured, jevProvider, subqConfigured, subqReader, type CollectOptions, type DecisionProvider, type LongReader } from "../../decide";
 import { reacherFromEnv, smtpTransport, type MailTransport } from "../../email";
 import { loadLibraryFrom } from "../../messages";
 import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects";
@@ -20,8 +21,12 @@ export interface WebContextOptions {
   secrets?: Secrets;
   /** The app's database: AI runs and drafts, and on a server without a disk the touch log too. */
   db?: Db;
-  /** Tests swap out Claude, the mailbox, the clock and the delays. */
+  /** Tests swap out Claude, Jev, SubQ, the web, the mailbox, the clock and the delays. */
   aiCall?: () => MessagesCall;
+  decider?: () => DecisionProvider;
+  reader?: () => LongReader;
+  /** How diligence reads prospects' websites. */
+  pages?: Pick<CollectOptions, "fetch" | "resolve">;
   transport?: (account: Account) => MailTransport;
   now?: () => Date;
   random?: () => number;
@@ -54,6 +59,8 @@ export class WebContext {
   readonly ai?: AiStore;
   /** Email sends, kept in the database so they outlive the server; only with the database. */
   readonly sends?: SendJobs;
+  /** The decision engine's decisions and what it learned; only with the database. */
+  readonly decisions?: DecideStore;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -66,6 +73,7 @@ export class WebContext {
     this.campaigns = new CampaignStore(this.files);
     if (options.db) {
       this.ai = new AiStore(options.db, () => this.now());
+      this.decisions = new DecideStore(options.db, () => this.now());
       this.sends = new SendJobs(options.db, {
         // Opened when a send picks up, from what is saved now: on Vercel that may be a later function than the one that queued it.
         tools: async (plan) => {
@@ -96,6 +104,23 @@ export class WebContext {
 
   now(): Date {
     return this.options.now?.() ?? new Date();
+  }
+
+  /** Who answers the decision questions: Jev when it has a key (or cold.yaml says so), else Claude. */
+  decider(settings: DecideSettings): DecisionProvider {
+    if (this.options.decider) return this.options.decider();
+    const choice = settings.provider;
+    if (choice === "jev" || (choice === "auto" && jevConfigured())) return jevProvider();
+    if (choice === "auto" && !aiConfigured() && !this.options.aiCall) throw new AiError("Add a TypeSafe API key (TYPESAFE_API_KEY, for Jev) or an Anthropic API key (ANTHROPIC_API_KEY, for Claude) in Settings to score prospects.", 400);
+    return claudeDecider({ call: this.claude() });
+  }
+
+  /** Who reads a prospect's site for diligence: SubQ when it has a key (or cold.yaml says so); undefined means Claude. */
+  reader(settings: DecideSettings): LongReader | undefined {
+    if (this.options.reader) return this.options.reader();
+    const choice = settings.diligence;
+    if (choice === "subq" || (choice === "auto" && subqConfigured())) return subqReader();
+    return undefined;
   }
 
   /**

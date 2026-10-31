@@ -3,7 +3,8 @@ import path from "node:path";
 import { parse } from "yaml";
 import { callSheetData, syncCallScripts } from "../../call";
 import type { Io } from "../../cli/io";
-import { APP_ROOT, getOffer, parseConfig, type Account, type ColdConfig, type Offer } from "../../config";
+import { APP_ROOT, getOffer, offerKeyOf, parseConfig, type Account, type ColdConfig, type Offer } from "../../config";
+import type { Decision } from "../../decide";
 import { dmChecklist, prepareDmRun, recordDmOutcome, type DmOutcome } from "../../dm";
 import { describeWindow, prepareEmailRun, smtpTransport, syncReplies, testImap, toSendPlan, type EmailOverride } from "../../email";
 import { findMessage, findSequence, lintMessage, lintSequences, toMessage, toSequences, type Library, type Message } from "../../messages";
@@ -64,10 +65,6 @@ function collectingIo(): Io & { lines: string[] } {
   return { interactive: false, lines, log: (line = "") => void lines.push(line.replace(ANSI, "")), confirm: async () => false, choose: async () => "q" };
 }
 
-function row(prospect: Prospect, extra: Omit<PlanRow, "key" | "label"> = {}): PlanRow {
-  return { key: prospect.key, label: prospect.label, ...extra };
-}
-
 /** The env vars the Settings page may set, with what each one is for. */
 function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
   const fields = new Map<string, string>([
@@ -79,6 +76,8 @@ function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
     if (a.email?.imapUrlEnv) fields.set(a.email.imapUrlEnv, `IMAP for ${a.key}: imaps://you%40domain.com:app-password@imap.gmail.com:993`);
   }
   fields.set("ANTHROPIC_API_KEY", "For the AI features: finding and researching prospects, drafts, call prep, reply triage (console.anthropic.com, API keys)");
+  fields.set("TYPESAFE_API_KEY", "Optional: Jev, TypeSafe's decision model, scores prospects and picks their tone. Without it Claude does (typesafe.ai)");
+  fields.set("SUBQ_API_KEY", "Optional: SubQ, Subquadratic's long-context model, reads a prospect's whole site for diligence. Without it Claude does (subq.ai)");
   fields.set("REACHER_URL", "Optional: a self-hosted Reacher, e.g. http://localhost:8080");
   fields.set("REACHER_SECRET", "Optional: Reacher's header secret");
   return [...fields.entries()].map(([name, hint]) => ({ name, set: !!process.env[name]?.trim(), hint }));
@@ -116,6 +115,7 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
       offer: input.offer?.trim() || undefined,
       source: (input.source ?? "").trim(),
       where: input.where?.trim() || undefined,
+      order: input.order === "score" ? "score" : undefined,
     };
     if (!campaign.name) throw new HttpError(400, "Give the campaign a name.");
     if (!SOURCE.test(campaign.source)) throw new HttpError(400, "Pick a prospect list: a CSV file or a Twenty source.");
@@ -124,11 +124,28 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
     return campaign;
   }
 
+  /**
+   * A campaign's prospects with the decision engine's latest call on each, for
+   * the campaign's offer. When it goes by score, the highest come first, so a
+   * daily cap that can't reach everyone reaches the most promising; anyone not
+   * scored yet follows in list order.
+   */
+  async function scored(campaign: Campaign, config: ColdConfig, prospects: Prospect[]): Promise<{ prospects: Prospect[]; scores: Map<string, Decision> }> {
+    const scores = (await ctx.decisions?.forProspects(prospects.map((p) => p.key), offerKeyOf(config, campaign.offer))) ?? new Map<string, Decision>();
+    if (campaign.order !== "score" || !scores.size) return { prospects, scores };
+    const ranked = prospects.map((p, i) => ({ p, i, score: scores.get(p.key)?.score ?? -1 })).sort((a, b) => b.score - a.score || a.i - b.i);
+    return { prospects: ranked.map((r) => r.p), scores };
+  }
+
   async function plan(campaign: Campaign, refresh: boolean): Promise<PlanResponse> {
     const { config, isExample } = await loadedConfig();
     const { sequence, account, offer } = resolveCampaign(campaign, (await ctx.library()).library, config);
     const store = await ctx.store(config);
-    const prospects = await ctx.prospects(campaign.source, campaign.where, refresh);
+    const { prospects, scores } = await scored(campaign, config, await ctx.prospects(campaign.source, campaign.where, refresh));
+    const row = (prospect: Prospect, extra: Omit<PlanRow, "key" | "label"> = {}): PlanRow => {
+      const d = scores.get(prospect.key);
+      return { key: prospect.key, label: prospect.label, ...extra, ...(d ? { score: d.score, tier: d.tier, action: d.action } : {}) };
+    };
     const now = () => ctx.now();
     const blockers: string[] = [];
     if (isExample) blockers.push("cold.yaml does not exist yet, so these would go out as the example sender. Create it in Settings.");
@@ -422,7 +439,7 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
         if (!sends) throw new HttpError(500, "Sending needs the app's database.");
         if (await sends.running(account.key)) throw new HttpError(409, `Already sending from ${account.key}. Wait for it to finish, or stop it.`);
         const store = await ctx.store(config);
-        const prospects = await ctx.prospects(campaign.source, campaign.where);
+        const { prospects } = await scored(campaign, config, await ctx.prospects(campaign.source, campaign.where));
         const prepared = await prepareEmailRun({ sequence, account, offer, prospects, store, limit: typeof limit === "number" && limit > 0 ? limit : undefined, now: () => ctx.now(), override: await emailOverride(campaign) });
         if (prepared.batch.length === 0) throw new HttpError(409, "Nothing to send right now.");
         if (prepared.windowOpen === false && !ignoreWindow) throw new HttpError(409, `Outside the sending window (${prepared.windowText}). Tick "Send anyway" to override.`);

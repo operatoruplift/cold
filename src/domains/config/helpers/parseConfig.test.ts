@@ -16,6 +16,19 @@ describe("parseConfig", () => {
     expect(config!.offers["booking-pages"]!.variables.audience).toBe("auto service shops");
   });
 
+  test("the decide section is optional, and checked when given", () => {
+    expect(parseConfig(example, "x").config!.decide).toEqual({ provider: "auto", diligence: "auto", reviewBelow: 0.75, explore: true });
+    const tuned = parseConfig({ ...example, decide: { provider: "jev", diligence: "subq", review_below: 0.6, explore: false } }, "x");
+    expect(tuned.config!.decide).toEqual({ provider: "jev", diligence: "subq", reviewBelow: 0.6, explore: false });
+    const { errors } = parseConfig({ ...example, decide: { provider: "gpt", review_below: 2, explore: "yes", speed: 1 } }, "x");
+    expect(errors).toEqual([
+      "decide.speed: not a decide setting (provider, diligence, review_below, explore)",
+      "decide.provider: must be auto, jev or claude",
+      "decide.review_below: must be a number from 0 to 1, e.g. 0.75",
+      "decide.explore: must be true or false",
+    ]);
+  });
+
   test("an account without a footer gets the default for its voice", () => {
     const { config } = parseConfig(example, "x");
     expect(config!.accounts.personal!.email!.footer).toBe(DEFAULT_FOOTERS.personal);

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { Db } from "../db";
 import type { AiUsage } from "./claude";
 
-export type AiRunKind = "find" | "research" | "draft" | "call" | "triage";
+export type AiRunKind = "find" | "research" | "draft" | "call" | "triage" | "diligence" | "decide";
+/** Whose API a run used. */
+export type AiProvider = "claude" | "jev" | "subq";
 
 export interface AiRun<T = unknown> {
   id: string;
@@ -103,20 +105,23 @@ export class AiStore {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  async start(kind: AiRunKind, subject: string | undefined, input: unknown): Promise<string> {
+  /** Start a run. The provider is whose API it uses, so each one's usage can be told apart: Claude, Jev or SubQ. */
+  async start(kind: AiRunKind, subject: string | undefined, input: unknown, provider: AiProvider = "claude"): Promise<string> {
     const id = randomUUID();
-    await this.db.run("INSERT INTO ai_runs (id, kind, subject, status, input, created_at) VALUES (?, ?, ?, 'running', ?, ?)", id, kind, subject ?? null, JSON.stringify(input), this.now().toISOString());
+    await this.db.run("INSERT INTO ai_runs (id, kind, subject, status, input, provider, created_at) VALUES (?, ?, ?, 'running', ?, ?, ?)", id, kind, subject ?? null, JSON.stringify(input), provider, this.now().toISOString());
     return id;
   }
 
-  async finish(id: string, result: { output: unknown; model: string; usage: AiUsage }): Promise<void> {
+  /** Save a finished run. A provider given here replaces the one it started with (diligence picks once it has read the site). */
+  async finish(id: string, result: { output: unknown; model: string; usage: AiUsage; provider?: AiProvider }): Promise<void> {
     await this.db.run(
-      "UPDATE ai_runs SET status = 'done', output = ?, model = ?, input_tokens = ?, output_tokens = ?, searches = ?, finished_at = ? WHERE id = ?",
+      "UPDATE ai_runs SET status = 'done', output = ?, model = ?, input_tokens = ?, output_tokens = ?, searches = ?, provider = COALESCE(?, provider), finished_at = ? WHERE id = ?",
       JSON.stringify(result.output),
       result.model,
       result.usage.inputTokens,
       result.usage.outputTokens,
       result.usage.searches,
+      result.provider ?? null,
       this.now().toISOString(),
       id,
     );
@@ -157,16 +162,39 @@ export class AiStore {
     return found;
   }
 
+  /** When each of these subjects last had a finished run of a kind, without loading the runs. */
+  async doneAt(kind: AiRunKind, subjects: string[]): Promise<Map<string, string>> {
+    const found = new Map<string, string>();
+    for (let i = 0; i < subjects.length; i += 400) {
+      const chunk = subjects.slice(i, i + 400);
+      const rows = await this.db.all<{ subject: string; at: string }>(
+        `SELECT subject, MAX(created_at) AS at FROM ai_runs WHERE kind = ? AND status = 'done' AND subject IN (${chunk.map(() => "?").join(",")}) GROUP BY subject`,
+        kind,
+        ...chunk,
+      );
+      for (const row of rows) found.set(row.subject, row.at);
+    }
+    return found;
+  }
+
   async recent(kind: AiRunKind, limit = 20): Promise<AiRun[]> {
     return (await this.db.all<RunRow>("SELECT * FROM ai_runs WHERE kind = ? ORDER BY created_at DESC LIMIT ?", kind, limit)).map(toRun);
   }
 
-  /** Tokens and searches used since a date, for the Settings page. */
+  /** Claude's tokens and searches since a date, for the Settings page. */
   async usageSince(since: Date): Promise<{ runs: number; inputTokens: number; outputTokens: number; searches: number }> {
     return (await this.db.get<{ runs: number; inputTokens: number; outputTokens: number; searches: number }>(
-      "SELECT COUNT(*) AS runs, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens, COALESCE(SUM(searches), 0) AS searches FROM ai_runs WHERE created_at >= ?",
+      "SELECT COUNT(*) AS runs, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens, COALESCE(SUM(searches), 0) AS searches FROM ai_runs WHERE created_at >= ? AND COALESCE(provider, 'claude') = 'claude'",
       since.toISOString(),
     ))!;
+  }
+
+  /** Runs and tokens since a date for each provider, for metering. */
+  async usageByProvider(since: Date): Promise<Array<{ provider: AiProvider; runs: number; inputTokens: number; outputTokens: number }>> {
+    return this.db.all(
+      "SELECT COALESCE(provider, 'claude') AS provider, COUNT(*) AS runs, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM ai_runs WHERE created_at >= ? GROUP BY COALESCE(provider, 'claude') ORDER BY provider",
+      since.toISOString(),
+    );
   }
 
   async saveDraft(draft: Omit<AiDraftRecord, "updatedAt">): Promise<AiDraftRecord> {

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **The decision engine.** Prospects has a new tab, **Score and prioritize**:
+  - **Diligence** reads a prospect's public website (only public addresses,
+    redirects re-checked, robots.txt honoured, size and time limits) and
+    writes down what they need, each need with the words that show it.
+    Sources that were never read are dropped and quotes are checked against
+    the page. SubQ (Subquadratic's long-context model, `SUBQ_API_KEY`) reads
+    every page at once; without it, Claude does, with a few searches.
+  - **Scoring** asks ten typed questions (fit, need, timing, who decides, can
+    they pay, tone, opening, objection, channel, next step). Jev, TypeSafe's
+    decision model (`TYPESAFE_API_KEY`), answers them; without it, Claude
+    does. The answers become a 0 to 100 score, a tier from A to D, a next step
+    with its reasons, and a flag when the call should be checked by you.
+  - **Drafts in their style.** Personalize writes in the tone and opening
+    picked for that person, around the need diligence confirmed; pick your
+    own from two menus. The draft says which style it used and why.
+  - **Highest score first.** A campaign can give the daily cap's sends to the
+    most promising prospects.
+  - **It learns from replies.** Every approved draft's style is matched to
+    what happened to it, and Thompson sampling, with the decision model's
+    opinion as its prior, shifts later picks toward what gets answered.
+    **Stats, What's working** shows reply rates by tone and opening, with
+    90% ranges, the chance each is best, and whether higher scores reply more.
+  - A `decide:` section in cold.yaml pins the providers, the review threshold
+    and exploration. How it all works, and the plan to sell it to other
+    businesses: docs/decision-engine.md.
 - **Runs on Vercel.** The site and the app are served from Vercel's CDN, the
   API runs as one function (`api/index.ts`, on Bun), and everything you save
   lives in a free Turso database: your files, the touch log, the waitlist,

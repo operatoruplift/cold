@@ -1,4 +1,4 @@
-import { CheckCircle2, ExternalLink, Globe, History, Mail, MapPin, Phone, Plus, Save, Search, Sparkles, Square, SquareCheck, Telescope, Wand2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Gauge, Globe, History, Mail, MapPin, Phone, Plus, Save, Search, Sparkles, Square, SquareCheck, Telescope, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { FindResult, FoundProspect, Research } from "../../domains/ai/tasks";
 import type { AiStatusResponse, ProspectSummary, SourceOption } from "../../domains/web/types";
@@ -9,18 +9,19 @@ import { api, ApiError, useApi } from "../lib/api";
 import { ago, sourceLabel } from "../lib/format";
 import { Button, Card, Empty, ErrorNotice, Field, Loading, Notice, PageHeader, Pill, Tabs } from "../ui/kit";
 import { useToast } from "../ui/toast";
+import { ScoreLists } from "./score";
 
-type Tab = "find" | "research";
+type Tab = "find" | "research" | "score";
 
 export function ProspectsPage() {
   const { query } = useLocation();
   const ai = useApi<AiStatusResponse>("/api/ai/status");
-  const tab: Tab = query.get("tab") === "research" ? "research" : "find";
+  const tab: Tab = query.get("tab") === "research" ? "research" : query.get("tab") === "score" ? "score" : "find";
   return (
     <>
       <PageHeader
         title="Prospects"
-        sub="Find businesses that fit your offer, research the people already on your lists, and give every message one true reason to reach out."
+        sub="Find businesses that fit your offer, research the people already on your lists, score who is most likely to buy, and give every message one true reason to reach out."
         actions={<span className="ai-badge"><Sparkles size={12} /> {ai.data?.model ?? "Claude"}</span>}
       />
       {ai.data && !ai.data.configured && (
@@ -35,9 +36,10 @@ export function ProspectsPage() {
           tabs={[
             { id: "find", label: "Find new prospects", icon: Telescope },
             { id: "research", label: "Research my lists", icon: Search },
+            { id: "score", label: "Score and prioritize", icon: Gauge },
           ]}
         />
-        <div className="card-body">{tab === "find" ? <Finder ai={ai.data} onRan={ai.reload} /> : <ResearchLists />}</div>
+        <div className="card-body">{tab === "find" ? <Finder ai={ai.data} onRan={ai.reload} /> : tab === "research" ? <ResearchLists /> : <ScoreLists />}</div>
       </Card>
     </>
   );

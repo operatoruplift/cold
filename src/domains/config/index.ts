@@ -72,6 +72,9 @@ export function getAccount(config: ColdConfig, key: string | undefined): Account
   return account;
 }
 
+/** The offer a decision is for, by key: the one named, else the default; "" when there are no offers. */
+export const offerKeyOf = (config: ColdConfig, key: string | undefined): string => getOffer(config, key)?.key ?? "";
+
 export function getOffer(config: ColdConfig, key: string | undefined): Offer | undefined {
   const chosen = key ?? config.defaultOffer ?? (Object.keys(config.offers).length === 1 ? Object.keys(config.offers)[0] : undefined);
   if (!chosen) return undefined;
