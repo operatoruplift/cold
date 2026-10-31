@@ -157,6 +157,13 @@ describe("guards", () => {
     expect(front.origins).toContain("https://coldthecompany.vercel.app");
     expect(front.proxyHops).toBe(2);
     expect(serverSettings({ COLD_PUBLIC_URL: "https://x.example", COLD_TRUST_PROXY: "0" }).proxyHops).toBe(0);
+    // On Vercel itself: production answers at the project's domain, a preview at its own address, and both at the deployment's.
+    const vercel = { VERCEL_PROJECT_PRODUCTION_URL: "coldthecompany.vercel.app", VERCEL_URL: "coldthecompany-abc123-operatoruplift.vercel.app" };
+    const production = serverSettings({ ...vercel, VERCEL_ENV: "production" });
+    expect(production.publicUrl.href).toBe("https://coldthecompany.vercel.app/");
+    expect(production.hosts).toEqual(expect.arrayContaining(["coldthecompany.vercel.app", "coldthecompany-abc123-operatoruplift.vercel.app"]));
+    expect(production.proxyHops).toBe(1);
+    expect(serverSettings({ ...vercel, VERCEL_ENV: "preview" }).publicUrl.href).toBe("https://coldthecompany-abc123-operatoruplift.vercel.app/");
     expect(() => serverSettings({ COLD_REQUIRE_PUBLIC_URL: "1" })).toThrow("Set COLD_PUBLIC_URL");
   });
 });

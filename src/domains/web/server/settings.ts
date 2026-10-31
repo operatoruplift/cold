@@ -83,6 +83,8 @@ function publicUrlFrom(env: Record<string, string | undefined>): string | undefi
   if (env.RENDER_EXTERNAL_URL) return env.RENDER_EXTERNAL_URL;
   if (env.RAILWAY_PUBLIC_DOMAIN) return `https://${env.RAILWAY_PUBLIC_DOMAIN}`;
   if (env.FLY_APP_NAME) return `https://${env.FLY_APP_NAME}.fly.dev`;
+  // A Vercel preview is opened at its own address; production at the project's domain.
+  if (env.VERCEL_ENV === "preview" && env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
   if (env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`;
   return undefined;
 }
