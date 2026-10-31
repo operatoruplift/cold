@@ -207,9 +207,11 @@ describe("the AI routes", () => {
     const { data: plan } = await call<PlanResponse>("GET", `/api/campaigns/${campaign.id}/plan`);
     const dana = plan.due.find((r) => r.label.startsWith("Dana"))!;
 
-    const drafted = await call<{ draft: { status: string; body: string } }>("POST", "/api/ai/draft", { campaignId: campaign.id, prospect: dana.key });
-    expect(drafted.status).toBe(200);
-    expect(drafted.data.draft.status).toBe("draft");
+    const started = await call<{ runId: string }>("POST", "/api/ai/draft", { campaignId: campaign.id, prospect: dana.key });
+    expect(started.status).toBe(202);
+    const drafted = await finished<{ draft: { status: string; body: string } }>(started.data.runId);
+    expect(drafted.status).toBe("done");
+    expect(drafted.output!.draft.status).toBe("draft");
     let after = (await call<PlanResponse>("GET", `/api/campaigns/${campaign.id}/plan`)).data;
     expect(after.due.find((r) => r.key === dana.key)!.custom).toBe(false);
 
@@ -224,11 +226,11 @@ describe("the AI routes", () => {
     // COLD's footer, with the postal address and opt-out, still follows your words.
     expect(row.text).toContain("123 Example St");
 
-    const started = await call<{ job: string }>("POST", `/api/campaigns/${campaign.id}/send`, { limit: 5 });
+    const sending = await call<{ job: string }>("POST", `/api/campaigns/${campaign.id}/send`, { limit: 5 });
     let job: JobResponse | undefined;
     for (let i = 0; i < 100 && job?.status !== "done"; i++) {
       await Bun.sleep(10);
-      job = (await call<JobResponse>("GET", `/api/jobs/${started.data.job}`)).data;
+      job = (await call<JobResponse>("GET", `/api/jobs/${sending.data.job}`)).data;
     }
     const toDana = sent.find((d) => d.to.startsWith("dana@"))!;
     expect(toDana.subject).toBe("your second bay");
@@ -236,8 +238,9 @@ describe("the AI routes", () => {
   });
 
   test("a reply that asks to stop: read, and the opt-out recorded keeps them out of every campaign", async () => {
-    const read = await call<{ output: { intent: string } }>("POST", "/api/ai/triage", { messageId: "<r1@example>", prospectKey: "email:priya@shinedetail.example", body: "Please remove me from your list." });
-    expect(read.data.output.intent).toBe("unsubscribe");
+    const reading = await call<{ runId: string }>("POST", "/api/ai/triage", { messageId: "<r1@example>", prospectKey: "email:priya@shinedetail.example", body: "Please remove me from your list." });
+    expect(reading.status).toBe(202);
+    expect((await finished<{ intent: string }>(reading.data.runId)).output!.intent).toBe("unsubscribe");
     expect((await call<Record<string, { intent: string }>>("GET", "/api/ai/triage?ids=%3Cr1%40example%3E")).data["<r1@example>"]!.intent).toBe("unsubscribe");
 
     expect((await call("POST", "/api/ai/opt-out", { prospectKey: "email:priya@shinedetail.example", prospectLabel: "Priya Shah", account: "personal" })).status).toBe(200);

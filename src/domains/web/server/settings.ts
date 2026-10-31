@@ -13,8 +13,12 @@ export interface ServerSettings {
   origins: string[];
   /** Session cookies only travel over HTTPS. */
   secureCookies: boolean;
-  /** Read the client address from X-Forwarded-For (set by the host's proxy). */
-  trustProxy: boolean;
+  /**
+   * How many proxies sit in front and append to X-Forwarded-For: 0 reads the
+   * socket address, 1 the host's own proxy, 2 a front door such as Vercel
+   * forwarding to the host. The client is that many entries from the end.
+   */
+  proxyHops: number;
 }
 
 /**
@@ -22,7 +26,8 @@ export interface ServerSettings {
  * makes it a hosted server: it listens on every interface (or COLD_HOST),
  * answers to that URL's host name, and marks cookies Secure when it is HTTPS.
  * PORT (set by most hosts) or COLD_UI_PORT picks the port. On Railway,
- * Render and Fly the public URL is known without COLD_PUBLIC_URL.
+ * Render and Fly the public URL is known without COLD_PUBLIC_URL, and the
+ * platform's own domain is always answered too.
  */
 export function serverSettings(env: Record<string, string | undefined> = process.env): ServerSettings {
   const port = Number(env.PORT || env.COLD_UI_PORT) || 4100;
@@ -38,7 +43,7 @@ export function serverSettings(env: Record<string, string | undefined> = process
       hosts: local,
       origins: local.map((h) => `http://${h}`),
       secureCookies: false,
-      trustProxy: false,
+      proxyHops: 0,
     };
   }
   let url: URL;
@@ -48,7 +53,9 @@ export function serverSettings(env: Record<string, string | undefined> = process
     throw new Error(`COLD_PUBLIC_URL is not a URL: ${publicUrl}`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("COLD_PUBLIC_URL must start with https:// (or http://)");
-  const extra = (env.COLD_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  // The host's own domain keeps working next to a custom or front-door address (Vercel forwards with it as the Host).
+  const platform = [env.RAILWAY_PUBLIC_DOMAIN, env.RENDER_EXTERNAL_HOSTNAME, env.FLY_APP_NAME && `${env.FLY_APP_NAME}.fly.dev`].filter((h): h is string => !!h);
+  const extra = [...new Set([...(env.COLD_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim()), ...platform])].filter((h) => h && h !== url.host);
   return {
     mode: "hosted",
     hostname: env.COLD_HOST || "0.0.0.0",
@@ -57,7 +64,7 @@ export function serverSettings(env: Record<string, string | undefined> = process
     hosts: [url.host, ...extra, ...local],
     origins: [url.origin, ...extra.map((h) => `${url.protocol}//${h}`), ...local.map((h) => `http://${h}`)],
     secureCookies: url.protocol === "https:",
-    trustProxy: env.COLD_TRUST_PROXY !== "0",
+    proxyHops: env.COLD_TRUST_PROXY === "0" ? 0 : Math.max(0, Math.min(5, Number(env.COLD_PROXY_HOPS ?? 1) || 0)),
   };
 }
 

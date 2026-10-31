@@ -132,20 +132,30 @@ describe("guards", () => {
     expect((await call("POST", "/api/waitlist", { email: "a@b.co" }, { origin: "https://evil.example" })).status).toBe(403);
   });
 
-  test("client address: the socket's, or the proxy's last X-Forwarded-For entry when trusted", () => {
-    const request = new Request("http://x/", { headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.9" } });
-    expect(clientAddress(true, () => "10.0.0.1")(request)).toBe("203.0.113.9");
-    expect(clientAddress(false, () => "10.0.0.1")(request)).toBe("10.0.0.1");
+  test("client address: the socket's, or the X-Forwarded-For entry the trusted proxies added", () => {
+    // A client wrote 6.6.6.6 itself; the front door saw 203.0.113.9; the host's proxy saw the front door at 76.76.21.21.
+    const request = new Request("http://x/", { headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.9, 76.76.21.21" } });
+    expect(clientAddress(1, () => "10.0.0.1")(request)).toBe("76.76.21.21");
+    expect(clientAddress(2, () => "10.0.0.1")(request)).toBe("203.0.113.9");
+    expect(clientAddress(0, () => "10.0.0.1")(request)).toBe("10.0.0.1");
+    expect(clientAddress(5, () => "10.0.0.1")(request)).toBe("6.6.6.6");
   });
 
   test("hosted settings answer on the public name with secure cookies", () => {
     const s = serverSettings({ COLD_PUBLIC_URL: "https://cold.example.com/", PORT: "8080" });
-    expect(s).toMatchObject({ mode: "hosted", hostname: "0.0.0.0", port: 8080, secureCookies: true, trustProxy: true });
+    expect(s).toMatchObject({ mode: "hosted", hostname: "0.0.0.0", port: 8080, secureCookies: true, proxyHops: 1 });
     expect(s.hosts).toContain("cold.example.com");
     expect(s.origins).toContain("https://cold.example.com");
     expect(() => serverSettings({ COLD_PUBLIC_URL: "ftp://x" })).toThrow("https://");
     expect(serverSettings({ RAILWAY_PUBLIC_DOMAIN: "cold-production.up.railway.app" }).publicUrl.href).toBe("https://cold-production.up.railway.app/");
     expect(serverSettings({ FLY_APP_NAME: "cold" }).hosts).toContain("cold.fly.dev");
+    // Behind Vercel: the public address is the front door, Railway's domain still answers, and two hops are trusted.
+    const front = serverSettings({ COLD_PUBLIC_URL: "https://coldthecompany.vercel.app", RAILWAY_PUBLIC_DOMAIN: "cold-production.up.railway.app", COLD_PROXY_HOPS: "2" });
+    expect(front.publicUrl.href).toBe("https://coldthecompany.vercel.app/");
+    expect(front.hosts).toEqual(expect.arrayContaining(["coldthecompany.vercel.app", "cold-production.up.railway.app"]));
+    expect(front.origins).toContain("https://coldthecompany.vercel.app");
+    expect(front.proxyHops).toBe(2);
+    expect(serverSettings({ COLD_PUBLIC_URL: "https://x.example", COLD_TRUST_PROXY: "0" }).proxyHops).toBe(0);
     expect(() => serverSettings({ COLD_REQUIRE_PUBLIC_URL: "1" })).toThrow("Set COLD_PUBLIC_URL");
   });
 });

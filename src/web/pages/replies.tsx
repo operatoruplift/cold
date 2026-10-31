@@ -3,6 +3,7 @@ import { Fragment, useMemo, useState } from "react";
 import type { Triage } from "../../domains/ai/tasks";
 import type { TouchRow } from "../../domains/web/types";
 import { useStatus } from "../app/status";
+import { runAndWait } from "../lib/ai";
 import { api, ApiError, useApi } from "../lib/api";
 import { sequenceName, when } from "../lib/format";
 import { Button, Card, Empty, ErrorNotice, Field, Loading, Notice, PageHeader, Pill, Stat, type Tone } from "../ui/kit";
@@ -185,11 +186,13 @@ const INTENT: Record<Triage["intent"], { label: string; tone: Tone }> = {
 };
 
 async function readReply(t: TouchRow): Promise<Triage> {
-  const r = await api<{ output: Triage }>("/api/ai/triage", {
-    method: "POST",
-    body: { messageId: t.messageId, prospectKey: t.prospectKey, prospectLabel: t.prospectLabel, subject: t.subject, body: t.body, account: t.account },
-  });
-  return r.output;
+  const run = await runAndWait<Triage>(() =>
+    api<{ runId: string }>("/api/ai/triage", {
+      method: "POST",
+      body: { messageId: t.messageId, prospectKey: t.prospectKey, prospectLabel: t.prospectLabel, subject: t.subject, body: t.body, account: t.account },
+    }),
+  );
+  return run.output!;
 }
 
 /** Read every reply that hasn't been read yet, one at a time. */

@@ -42,12 +42,12 @@ export function useAiRun<T>(runId: string | undefined): { run?: AiRun<T>; error?
   return { run, error, elapsed };
 }
 
-/** Start a background run and wait for it, for one-off research from a list row. */
+/** Start a background run and wait for it: quick checks at first (a draft takes seconds), then every two seconds. */
 export async function runAndWait<T>(start: () => Promise<{ runId: string }>, onTick?: (seconds: number) => void): Promise<AiRun<T>> {
   const { runId } = await start();
   const began = Date.now();
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 2000));
+  for (let check = 0; ; check++) {
+    await new Promise((r) => setTimeout(r, Math.min(2000, 700 + check * 300)));
     onTick?.(Math.round((Date.now() - began) / 1000));
     const run = await api<AiRun<T>>(`/api/ai/runs/${runId}`);
     if (run.status === "done") return run;

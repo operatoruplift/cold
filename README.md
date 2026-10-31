@@ -260,10 +260,11 @@ while a send is going; the send stops if COLD is closed.
 ### Host it
 
 To reach COLD from your phone, share the site and collect a waitlist, run it on
-a server with HTTPS: Railway, Render, Fly or any VPS. One container, one volume
-for your files. Set `COLD_PUBLIC_URL` (Railway, Render and Fly fill it in for
-you), deploy, and open the setup link it prints in the logs. Step by step:
-[docs/deploy.md](docs/deploy.md).
+a server with HTTPS: Railway (the repository carries its `railway.json`),
+Render, Fly or any VPS. One container, one volume for your files. Set
+`COLD_PUBLIC_URL` (Railway, Render and Fly fill it in for you), deploy, and open
+the setup link it prints in the logs. A Vercel address can stand in front as
+the public URL. Step by step: [docs/deploy.md](docs/deploy.md).
 
 ### From the terminal
 

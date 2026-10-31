@@ -10,3 +10,4 @@ prospects*.csv
 docs/screenshots
 *.log
 .DS_Store
+deploy

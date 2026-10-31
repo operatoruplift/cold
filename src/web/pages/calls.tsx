@@ -5,6 +5,7 @@ import type { CallSheet } from "../../domains/call";
 import type { ActionResponse, LibraryResponse } from "../../domains/web/types";
 import { setQuery, useLocation } from "../app/router";
 import { useStatus } from "../app/status";
+import { runAndWait } from "../lib/ai";
 import { api, ApiError, useApi } from "../lib/api";
 import { voiceLabel } from "../lib/format";
 import { Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Pill, Tabs } from "../ui/kit";
@@ -138,9 +139,11 @@ function CallPrepPanel({ script, source, prospect }: { script: string; source: s
     setBusy(true);
     setError(undefined);
     try {
-      const r = await api<{ output: CallPrep; researched: boolean }>("/api/ai/call", { method: "POST", body: { script, source: source || undefined, prospect: prospect || undefined } });
-      setPrep(r.output);
-      setResearched(r.researched);
+      const run = await runAndWait<{ prep: CallPrep; researched: boolean }>(() =>
+        api<{ runId: string }>("/api/ai/call", { method: "POST", body: { script, source: source || undefined, prospect: prospect || undefined } }),
+      );
+      setPrep(run.output!.prep);
+      setResearched(run.output!.researched);
     } catch (err) {
       setError(err as ApiError);
     } finally {

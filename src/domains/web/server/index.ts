@@ -54,7 +54,7 @@ const handler = createHandler({
   waitlist,
   privateApi: createApi(ctx, aiRoutes(ctx)),
   setup,
-  clientIp: clientAddress(settings.trustProxy, (request) => server.requestIP(request)?.address),
+  clientIp: clientAddress(settings.proxyHops, (request) => server.requestIP(request)?.address),
 });
 
 try {

@@ -12,7 +12,8 @@ and any VPS works the same way.
 | Build | the `Dockerfile` in this repository |
 | Volume | mounted at `/data` (1 GB is plenty). It holds `cold.yaml`, `.env.local`, the database (waitlist, login, AI drafts), prospect lists and your copy of the message library. |
 | `COLD_PUBLIC_URL` | the address people open, e.g. `https://cold.example.com`. Railway, Render and Fly set it for you from their own domain; set it yourself for a custom domain. |
-| `COLD_ALLOWED_HOSTS` | optional: other host names that reach the same server, comma separated (your platform domain, when `COLD_PUBLIC_URL` is a custom domain) |
+| `COLD_ALLOWED_HOSTS` | optional: other host names that reach the same server, comma separated. Railway's, Render's and Fly's own domains are added for you. |
+| `COLD_PROXY_HOPS` | how many proxies sit in front: 1 (default) for the host's own, 2 with a front door such as Vercel |
 | Port | the server reads `PORT` (default 4100) |
 | Health check | `GET /api/health` |
 | Secrets | optional here: `ANTHROPIC_API_KEY`, `SMTP_URL_*`, `IMAP_URL_*`, `TWENTY_*`. You can also paste them in Settings once you're in; those are saved to `/data/.env.local`. |
@@ -42,13 +43,43 @@ reset a forgotten password on the server, open its shell and run
 
 ## Railway
 
-1. New project, Deploy from GitHub repo, pick your fork of `cold`. Railway
-   finds the `Dockerfile`.
-2. Add a volume to the service, mounted at `/data`.
-3. Settings, Networking, Generate Domain (or add your own). Railway passes the
-   domain to COLD as `RAILWAY_PUBLIC_DOMAIN`; for a custom domain set
-   `COLD_PUBLIC_URL`.
-4. Deploy, then open the setup link from the deploy logs.
+The repository carries a `railway.json`: Railway builds the `Dockerfile`,
+checks `/api/health` before switching traffic, and restarts COLD if it stops.
+
+1. [railway.com](https://railway.com), New Project, Deploy from GitHub repo,
+   pick `operatoruplift/cold` (let Railway's GitHub app see it if asked).
+   The first deploy stops with "Set COLD_PUBLIC_URL": expected, the next steps
+   fix it.
+2. In the service, Settings, Networking, Generate Domain (target port 4100 if
+   it asks). You get an address like `cold-production.up.railway.app`, which
+   COLD picks up as `RAILWAY_PUBLIC_DOMAIN`.
+3. Attach a volume to the service, mounted at `/data`.
+4. Variables (optional now, or later in COLD's Settings): `ANTHROPIC_API_KEY`
+   and your `SMTP_URL_*`, `IMAP_URL_*`, `TWENTY_*`. Behind a front door such as
+   Vercel (next section), also `COLD_PUBLIC_URL` and `COLD_PROXY_HOPS=2`.
+5. Deploy. The deploy logs print the setup link for your login.
+
+Every push to `main` redeploys; `/data` stays.
+
+## A front door on Vercel
+
+Vercel cannot run COLD itself (no disk, no long-running process), but a
+Vercel address can stand in front of it, so people see
+`https://coldthecompany.vercel.app` while Railway does the work. Deploy a
+project that holds only this `vercel.json`, with your Railway domain:
+
+```json
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "routes": [{ "src": "/(.*)", "dest": "https://cold-production.up.railway.app/$1" }]
+}
+```
+
+On Railway set `COLD_PUBLIC_URL=https://coldthecompany.vercel.app` (cookies,
+links and the setup link use it; Railway's own domain keeps working) and
+`COLD_PROXY_HOPS=2`, so rate limits read the visitor's address that Vercel
+records rather than Vercel's own. Every AI request runs in the background, so
+no request waits on Claude behind the proxy.
 
 ## Render
 
@@ -119,8 +150,9 @@ somewhere that keeps it running.
   so another domain cannot point at it.
 - Session cookies are `Secure`, `HttpOnly` and `SameSite=Strict`; pages carry a
   strict Content Security Policy and HSTS.
-- Client addresses for rate limiting come from the last `X-Forwarded-For`
-  entry, the one your host's proxy adds. Set `COLD_TRUST_PROXY=0` if nothing
+- Client addresses for rate limiting come from `X-Forwarded-For`, read
+  `COLD_PROXY_HOPS` entries from the end (default 1: the one your host's proxy
+  adds; 2 with a front door like Vercel). Set `COLD_TRUST_PROXY=0` if nothing
   sits in front of COLD.
 - Updates: redeploy. The service worker notices the new version and the app
   offers to reload. Your files on `/data` stay; the message library there is

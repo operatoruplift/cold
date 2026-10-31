@@ -272,12 +272,17 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
   };
 }
 
-/** The client address: the socket's, or with a trusted proxy the last X-Forwarded-For entry (the one the proxy added). */
-export function clientAddress(trustProxy: boolean, socketIp: (request: Request) => string | undefined): (request: Request) => string | undefined {
+/**
+ * The client address: the socket's, or behind proxies the X-Forwarded-For
+ * entry `hops` from the end. Each trusted proxy appends the address it saw,
+ * so anything a client wrote into the header itself sits further left and is
+ * never read.
+ */
+export function clientAddress(hops: number, socketIp: (request: Request) => string | undefined): (request: Request) => string | undefined {
   return (request) => {
-    if (trustProxy) {
+    if (hops > 0) {
       const forwarded = request.headers.get("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean);
-      if (forwarded?.length) return forwarded[forwarded.length - 1];
+      if (forwarded?.length) return forwarded[Math.max(0, forwarded.length - hops)];
     }
     return socketIp(request);
   };

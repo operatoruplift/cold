@@ -64,12 +64,11 @@ const AI_COLUMNS = ["id", "first_name", "last_name", "title", "company", "email"
 const host = (url?: string | null) => (url ? url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]!.toLowerCase() : "");
 
 /**
- * The AI routes, all behind the login. Finding and researching prospects
- * search the web and can take minutes, so they run in the background: the
- * call returns a run id and the app asks /api/ai/runs/:id until it is done.
- * Drafts, call prep and reply triage answer straight away. Nothing here sends
- * anything: drafts wait for your approval, and the existing caps, windows and
- * opt-outs still decide what goes out.
+ * The AI routes, all behind the login. Every request to Claude runs in the
+ * background: the call returns a run id and the app asks /api/ai/runs/:id
+ * until it is done (a web search takes minutes, a draft seconds). Nothing here
+ * sends anything: drafts wait for your approval, and the existing caps,
+ * windows and opt-outs still decide what goes out.
  */
 export function aiRoutes(ctx: WebContext): Route[] {
   const store = () => {
@@ -77,26 +76,16 @@ export function aiRoutes(ctx: WebContext): Route[] {
     return ctx.ai;
   };
 
-  /** Record a run, answer with its output; failures are recorded and explained. */
-  async function run<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: () => Promise<AiResult<T>>): Promise<{ runId: string; output: T }> {
+  /**
+   * Start a run and return at once; the work carries on and lands in the
+   * database, where the app picks it up from /api/ai/runs/:id. No request waits
+   * on Claude, so no proxy in front (Railway's, Vercel's) can time one out.
+   */
+  function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: (runId: string) => Promise<AiResult<T>>): string {
     const ai = store();
     const runId = ai.start(kind, subject, input);
-    try {
-      const result = await work();
-      ai.finish(runId, result);
-      return { runId, output: result.output };
-    } catch (err) {
-      const error = explainError(err);
-      ai.fail(runId, error.message);
-      throw new HttpError(error.status, error.message);
-    }
-  }
-
-  /** Start a run and return at once; the work carries on and lands in the database. */
-  function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: () => Promise<AiResult<T>>): string {
-    const ai = store();
-    const runId = ai.start(kind, subject, input);
-    work()
+    void Promise.resolve()
+      .then(() => work(runId))
       .then((result) => ai.finish(runId, result))
       .catch((err) => ai.fail(runId, explainError(err).message));
     return runId;
@@ -315,8 +304,8 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const { campaign, sequence, account, offer, item, rendered } = due;
         const call = ctx.claude();
         const step = item.step.step ?? 1;
-        const { runId, output } = await run("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, () =>
-          draftMessage({
+        const runId = background("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, async (id) => {
+          const result = await draftMessage({
             call,
             channel: sequence.channel === "email" ? "email" : "dm",
             sender: senderOf(account),
@@ -326,10 +315,12 @@ export function aiRoutes(ctx: WebContext): Route[] {
             template: { subject: rendered.subject, body: rendered.body },
             maxChars: item.step.maxChars,
             threaded: sequence.channel === "email" && !item.first,
-          }),
-        );
-        const saved = store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: output.subject ?? rendered.subject, body: output.body, status: "draft", runId });
-        return json({ draft: saved, changes: output.changes, personalLine: output.personal_line, template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing }, researched: !!due.research });
+          });
+          const out = result.output;
+          const draft = store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: out.subject ?? rendered.subject, body: out.body, status: "draft", runId: id });
+          return { ...result, output: { draft, changes: out.changes, personalLine: out.personal_line, template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing }, researched: !!due.research } };
+        });
+        return json({ runId }, 202);
       },
     ],
     [
@@ -373,17 +364,19 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const prospect = body.source && body.prospect ? await prospectFrom(body.source, body.prospect) : undefined;
         const sheet = callSheetData(script, library, account, offer, prospect);
         const call = ctx.claude();
-        const result = await run("call", prospect?.key ?? script.id, { script: script.id, prospect: prospect?.key }, () =>
-          prepCall({
+        const known = prospect ? research(prospect.key) : undefined;
+        const runId = background("call", prospect?.key ?? script.id, { script: script.id, prospect: prospect?.key }, async () => {
+          const result = await prepCall({
             call,
             sender: senderOf(account),
             offer: offerOf(offer),
             prospect: prospect ? prospectOf(prospect) : {},
-            research: prospect ? research(prospect.key) : undefined,
+            research: known,
             script: { title: sheet.title, sections: sheet.sections, objections: sheet.objections },
-          }),
-        );
-        return json({ ...result, researched: !!(prospect && research(prospect.key)) });
+          });
+          return { ...result, output: { prep: result.output, researched: !!known } };
+        });
+        return json({ runId }, 202);
       },
     ],
     [
@@ -398,10 +391,10 @@ export function aiRoutes(ctx: WebContext): Route[] {
         if (!account) throw new HttpError(400, "cold.yaml has no accounts.");
         const subject = body.messageId || createHash("sha1").update(text).digest("hex");
         const call = ctx.claude();
-        const result = await run<Triage>("triage", subject, { prospect: body.prospectKey, messageId: body.messageId }, () =>
+        const runId = background<Triage>("triage", subject, { prospect: body.prospectKey, messageId: body.messageId }, () =>
           triageReply({ call, sender: senderOf(account), offer: offerOf(getOffer(c, undefined)), prospect: { name: body.prospectLabel ?? body.prospectKey }, reply: { subject: body.subject, body: text } }),
         );
-        return json({ ...result, id: subject });
+        return json({ runId, id: subject }, 202);
       },
     ],
     [

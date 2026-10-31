@@ -2,6 +2,7 @@ import { Check, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AiDraftRecord } from "../../domains/ai/store";
 import type { PlanRow } from "../../domains/web/types";
+import { runAndWait } from "../lib/ai";
 import { api, ApiError } from "../lib/api";
 import { Button, ErrorNotice } from "./kit";
 import { useToast } from "./toast";
@@ -39,7 +40,8 @@ export function AiDraft({ campaignId, row, channel, existing, onChanged }: { cam
     setBusy("ai");
     setError(undefined);
     try {
-      const answer = await api<DraftAnswer>("/api/ai/draft", { method: "POST", body: { campaignId, prospect: row.key } });
+      const run = await runAndWait<DraftAnswer>(() => api<{ runId: string }>("/api/ai/draft", { method: "POST", body: { campaignId, prospect: row.key } }));
+      const answer = run.output!;
       setDraft(answer.draft);
       setSubject(answer.draft.subject ?? "");
       setBody(answer.draft.body);
