@@ -2,13 +2,13 @@
 
 /* COLD palette (brand guidelines v1.0) and the few derived tones the page needs. */
 :root {
-  --sky: #39b8ff;
+  --sky: #3bc6ff;
   --sky-deep: #128ce5;
-  --glacier: #a3dcff;
-  --ice: #e7f7ff;
-  --snow: #f7fcff;
-  --midnight: #081726;
-  --ink: #081726;
+  --glacier: #8edbff;
+  --ice: #e9f6ff;
+  --snow: #fafcff;
+  --midnight: #0b1f3b;
+  --ink: #0b1f3b;
   --ink-2: #3d5568;
   --ink-3: #6e8192;
   --line: #d8e7f1;
@@ -269,7 +269,7 @@ html:not(.js) [data-reveal] {
   gap: 28px;
 }
 .nav-logo img {
-  width: 132px;
+  width: 124px;
   height: auto;
 }
 .nav-links {

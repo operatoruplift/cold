@@ -7,18 +7,22 @@ line: *Cold outreach. Warm conversations.* Voice: direct, smart, human.
 
 | File | Use |
 |---|---|
-| `cold-logo.svg` | Primary: the ice-gradient mark with the Midnight wordmark, on light backgrounds |
+| `cold-logo.svg` | Primary, horizontal: the gradient mark with the Deep Navy wordmark, on light backgrounds |
+| `cold-logo-stacked.svg` | The wordmark under the mark |
 | `cold-logo-white.svg` | The gradient mark with a white wordmark, on dark backgrounds |
-| `cold-logo-midnight.svg`, `cold-logo-snow.svg` | One-colour versions |
-| `cold-mark.svg`, `cold-mark-white.svg`, `cold-mark-midnight.svg` | The mountain-cut C alone: avatars, favicons, small spaces |
-| `app-icon.svg`, `app-icon-maskable.svg` | The white mark on a sky tile; the maskable one keeps the mark inside the safe zone |
+| `cold-logo-midnight.svg` | Dark monochrome: a navy mark with white facet lines |
+| `cold-logo-snow.svg` | All white, for Sky or photo backgrounds |
+| `cold-mark.svg`, `cold-mark-white.svg`, `cold-mark-midnight.svg` | The mark alone: avatars, favicons, small spaces |
+| `app-icon.svg`, `app-icon-maskable.svg` | The gradient mark on a snow-to-ice tile; the maskable one keeps the mark inside the safe zone |
 | `ridges.svg`, `clouds.svg` | The alpine illustration and the cloud bank used on the site and the sign-in screen |
 
-The mark and the layout come from `COLD_Transparent_Gradient.svg`. The wordmark
-is the same text (Inter Display Bold, 195 px, 23 px tracking) turned into
-outlines, so it looks the same where Inter is not installed. The PNG icons in
-`public/icons/`, `favicon.ico` and the share image `public/og.png` are
-rendered from these files.
+The mark is the C from the brand board: a gradient ring with a deep-blue wave
+across its lower left, a light crest, and a faceted ice peak rising into the
+opening. It is drawn as vectors (an ellipse for the outside, the traced hole,
+straight cuts, and seven gradient regions), so it stays sharp at every size.
+The wordmark is Montserrat ExtraBold (OFL) turned into outlines, so it looks
+the same everywhere. The PNG icons in `public/icons/`, `favicon.ico` and the
+share image `public/og.png` are rendered from these files.
 
 Rules from the guidelines: keep the proportions, leave clear space, never
 stretch or rotate it; the wordmark at 240 px wide or more, the mark alone
@@ -28,13 +32,14 @@ below that.
 
 | Name | Hex | Use |
 |---|---|---|
-| Sky Blue | `#39B8FF` | Signature marks and primary buttons (with Midnight text) |
-| Glacier | `#A3DCFF` | Secondary surfaces, accents on dark |
-| Ice | `#E7F7FF` | Soft fills, AI surfaces |
-| Snow | `#F7FCFF` | Page background |
-| Midnight | `#081726` | Text, dark sections |
+| Sky Blue | `#3BC6FF` | Primary brand colour: signature marks and primary buttons (with Deep Navy text) |
+| Glacier Blue | `#8EDBFF` | Secondary brand colour, accents on dark |
+| Ice Blue | `#E9F6FF` | Accent: soft fills, AI surfaces |
+| Snow White | `#FAFCFF` | Page background |
+| Deep Navy | `#0B1F3B` | Text and high contrast, dark sections |
 
-The logo gradient runs `#128CE5` to `#A3DCFF`. Link text uses `#0B72C2`, which
+The mark's gradient runs from near-white `#D6F7FF` through Sky to the wave's
+`#0757EA`. Link text uses `#0B72C2`, which
 reads at 4.5:1 on white where Sky does not.
 
 ## Type

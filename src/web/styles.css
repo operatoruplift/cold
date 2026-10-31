@@ -6,28 +6,28 @@
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* COLD palette: Sky, Glacier, Ice, Snow, Midnight. */
-  --sky: #39b8ff;
+  --sky: #3bc6ff;
   --sky-deep: #128ce5;
-  --glacier: #a3dcff;
-  --ice: #e7f7ff;
-  --snow: #f7fcff;
-  --midnight: #081726;
+  --glacier: #8edbff;
+  --ice: #e9f6ff;
+  --snow: #fafcff;
+  --midnight: #0b1f3b;
 
   --bg: #ffffff;
-  --bg-subtle: #f7fcff;
+  --bg-subtle: #fafcff;
   --bg-muted: #eef6fb;
   --bg-hover: #f2f8fc;
   --border: #e0ebf2;
   --border-strong: #cddfea;
 
-  --text: #081726;
+  --text: #0b1f3b;
   --text-2: #3d5568;
   --text-3: #6e8192;
 
-  --brand: #39b8ff;
+  --brand: #3bc6ff;
   --brand-hover: #27a9f5;
-  --brand-ink: #081726;
-  --brand-soft: #e7f7ff;
+  --brand-ink: #0b1f3b;
+  --brand-soft: #e9f6ff;
   --brand-text: #0b72c2;
 
   --green: #12754c;
@@ -112,7 +112,7 @@ h1, h2, h3, p { margin: 0; }
 .btn.primary:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
 .btn.dark { background: var(--midnight); border-color: var(--midnight); color: #fff; }
 .btn.dark:hover:not(:disabled) { background: #12283d; }
-.btn.ai { background: linear-gradient(100deg, #e7f7ff, #d6efff); border-color: #b7e0fa; color: #075a99; }
+.btn.ai { background: linear-gradient(100deg, #e9f6ff, #d6efff); border-color: #b7e0fa; color: #075a99; }
 .btn.ai:hover:not(:disabled) { background: linear-gradient(100deg, #dff3ff, #c8e9ff); }
 .btn.success { background: var(--green); border-color: var(--green); color: #fff; }
 .btn.danger { color: var(--red); border-color: #f3c4c4; }
@@ -302,7 +302,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .banner .spacer { flex: 1; }
 
 /* AI pieces */
-.ai-badge { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; background: linear-gradient(100deg, #e7f7ff, #d3eeff); color: #075a99; font-size: 11.5px; font-weight: 700; }
+.ai-badge { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; background: linear-gradient(100deg, #e9f6ff, #d3eeff); color: #075a99; font-size: 11.5px; font-weight: 700; }
 .ai-card { border: 1px solid #c9e8fb; border-radius: var(--radius-card); background: linear-gradient(180deg, #f5fbff, #ffffff 60%); }
 .ai-card .card-head { border-bottom-color: #dceffb; }
 .ai-thinking { display: flex; align-items: center; gap: 10px; padding: 16px; color: #075a99; font-weight: 600; }

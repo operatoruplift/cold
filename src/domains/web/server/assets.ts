@@ -62,7 +62,7 @@ const COMMON_HEAD = [
 function siteHead(publicUrl: URL): string[] {
   const url = publicUrl.origin;
   return [
-    '<meta name="theme-color" content="#F7FCFF">',
+    '<meta name="theme-color" content="#FAFCFF">',
     `<link rel="canonical" href="${url}/">`,
     '<meta property="og:type" content="website">',
     '<meta property="og:site_name" content="COLD">',
@@ -78,7 +78,7 @@ function siteHead(publicUrl: URL): string[] {
 
 const APP_HEAD = [
   '<link rel="manifest" href="/manifest.webmanifest">',
-  '<meta name="theme-color" content="#F7FCFF">',
+  '<meta name="theme-color" content="#FAFCFF">',
   '<meta name="robots" content="noindex">',
   '<meta name="mobile-web-app-capable" content="yes">',
   '<meta name="apple-mobile-web-app-capable" content="yes">',
