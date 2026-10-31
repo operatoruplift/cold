@@ -2,13 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { parseConfig } from "./helpers";
+import { APP_ROOT } from "./root";
 import type { Account, ColdConfig, Offer } from "./types";
 
 export * from "./types";
 export * from "./helpers";
-
-/** The repository: the example config, examples/ and the bundled message library. */
-export const APP_ROOT = path.resolve(import.meta.dir, "../../..");
+export { APP_ROOT };
 
 /**
  * Where your own files live: cold.yaml, .env.local, .cold/ and prospect lists.
@@ -26,14 +25,19 @@ export function configPaths(root = ROOT): { file: string; example: string } {
 /** Parse and validate one config file. Throws with every problem listed. */
 export function loadConfigFile(file: string, isExample = false): ColdConfig {
   if (!existsSync(file)) throw new Error(`${path.relative(process.cwd(), file) || file} not found. Copy cold.example.yaml to cold.yaml.`);
+  return configFromText(readFileSync(file, "utf8"), path.basename(file), isExample);
+}
+
+/** Parse and validate config text, as read from a file or the database. Throws with every problem listed. */
+export function configFromText(text: string, name: string, isExample = false): ColdConfig {
   let raw: unknown;
   try {
-    raw = parse(readFileSync(file, "utf8"));
+    raw = parse(text);
   } catch (err) {
-    throw new Error(`${path.basename(file)} is not valid YAML: ${(err as Error).message.split("\n")[0]}`);
+    throw new Error(`${name} is not valid YAML: ${(err as Error).message.split("\n")[0]}`);
   }
-  const { config, errors } = parseConfig(raw, path.basename(file), isExample);
-  if (!config) throw new Error(`${path.basename(file)} has problems:\n  - ${errors.join("\n  - ")}`);
+  const { config, errors } = parseConfig(raw, name, isExample);
+  if (!config) throw new Error(`${name} has problems:\n  - ${errors.join("\n  - ")}`);
   return config;
 }
 

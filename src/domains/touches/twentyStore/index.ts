@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { Files } from "../../storage";
 import { filterAnd, filterIn, filterValue, readLiveSchema, type TwentyClient, type TwentyRecord } from "../../twenty";
 import type { ProspectLinks } from "../../prospects";
 import type { Touch, TouchStore } from "../types";
@@ -15,6 +16,34 @@ const RELATIONS = [
 
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Where touches Twenty refused wait to be written: a file, or a path in your files on a server without a disk. */
+export interface Journal {
+  readonly where: string;
+  read(): Promise<string | undefined>;
+  /** Replace the journal; undefined removes it. */
+  write(text: string | undefined): Promise<void>;
+}
+
+export function fileJournal(file: string): Journal {
+  return {
+    where: file,
+    read: async () => (existsSync(file) ? readFileSync(file, "utf8") : undefined),
+    write: async (text) => {
+      if (text === undefined) return void (existsSync(file) && rmSync(file));
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, text);
+    },
+  };
+}
+
+export function filesJournal(files: Files, p: string): Journal {
+  return {
+    where: files.display(p),
+    read: () => files.read(p),
+    write: async (text) => void (text === undefined ? await files.remove(p) : await files.write(p, text)),
+  };
+}
 
 /**
  * A touch that could not be written to Twenty. It is kept in the journal and
@@ -47,7 +76,7 @@ export class TwentyStore implements TouchStore {
   private constructor(
     private readonly client: TwentyClient,
     private readonly fields: Set<string>,
-    private readonly journal: string,
+    private readonly journal: Journal,
     private readonly retryDelayMs: number,
   ) {}
 
@@ -55,18 +84,19 @@ export class TwentyStore implements TouchStore {
    * Checks coldTouch exists, learns which relations this workspace has, and
    * first writes any touches an earlier run could not save (the journal).
    */
-  static async open(client: TwentyClient, journal: string, options: { retryDelayMs?: number } = {}): Promise<TwentyStore> {
+  static async open(client: TwentyClient, journal: string | Journal, options: { retryDelayMs?: number } = {}): Promise<TwentyStore> {
     const live = await readLiveSchema((query, variables) => client.metadata(query, variables));
     const touch = live.get("coldTouch");
     if (!touch) throw new Error("This Twenty workspace has no coldTouch object yet. Run: bun run twenty:schema");
-    const store = new TwentyStore(client, new Set(touch.fields.keys()), journal, options.retryDelayMs ?? 1000);
+    const store = new TwentyStore(client, new Set(touch.fields.keys()), typeof journal === "string" ? fileJournal(journal) : journal, options.retryDelayMs ?? 1000);
     await store.replayJournal();
     return store;
   }
 
   private async replayJournal(): Promise<void> {
-    if (!existsSync(this.journal)) return;
-    const pending = readFileSync(this.journal, "utf8")
+    const text = await this.journal.read();
+    if (text === undefined) return;
+    const pending = text
       .split("\n")
       .filter((line) => line.trim())
       .map((line) => JSON.parse(line) as Touch);
@@ -79,11 +109,11 @@ export class TwentyStore implements TouchStore {
       }
     }
     if (left.length === 0) {
-      rmSync(this.journal);
+      await this.journal.write(undefined);
       return;
     }
-    writeFileSync(this.journal, left.map((t) => JSON.stringify(t)).join("\n") + "\n");
-    throw new Error(`${left.length} touch${left.length === 1 ? "" : "es"} from an earlier run still could not be saved to Twenty (kept in ${this.journal}). Nothing is planned until they are, so nobody gets the same message twice. Check the connection and run again.`);
+    await this.journal.write(left.map((t) => JSON.stringify(t)).join("\n") + "\n");
+    throw new Error(`${left.length} touch${left.length === 1 ? "" : "es"} from an earlier run still could not be saved to Twenty (kept in ${this.journal.where}). Nothing is planned until they are, so nobody gets the same message twice. Check the connection and run again.`);
   }
 
   get where(): string {
@@ -139,9 +169,8 @@ export class TwentyStore implements TouchStore {
         if (attempt < 2) await sleep(this.retryDelayMs * (attempt + 1));
       }
     }
-    mkdirSync(path.dirname(this.journal), { recursive: true });
-    appendFileSync(this.journal, `${JSON.stringify(touch)}\n`);
-    throw new TouchNotSavedError(`Twenty did not save the ${touch.kind} touch for ${touch.prospectLabel ?? touch.prospectKey} (${(lastError as Error)?.message ?? lastError}). It is kept in ${this.journal} and saved before the next run plans anything.`);
+    await this.journal.write(`${(await this.journal.read()) ?? ""}${JSON.stringify(touch)}\n`);
+    throw new TouchNotSavedError(`Twenty did not save the ${touch.kind} touch for ${touch.prospectLabel ?? touch.prospectKey} (${(lastError as Error)?.message ?? lastError}). It is kept in ${this.journal.where} and saved before the next run plans anything.`);
   }
 
   /** Touches keyed to any of these identities, or sent to one of their email addresses. */

@@ -40,9 +40,9 @@ export interface Touch {
   links?: ProspectLinks;
 }
 
-/** Where touches are kept: Twenty (coldTouches) or a local JSON-lines file. */
+/** Where touches are kept: Twenty (coldTouches), a local JSON-lines file, or the app's database on a server without a disk. */
 export interface TouchStore {
-  readonly kind: "twenty" | "file";
+  readonly kind: "twenty" | "file" | "database";
   /** Where it writes, for messages to the user. */
   readonly where: string;
   record(touch: Touch): Promise<void>;

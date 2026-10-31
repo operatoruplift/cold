@@ -16,7 +16,7 @@ import { OwnerAuth } from "../../auth";
 import { APP_ROOT, loadEnvFiles, ROOT } from "../../config";
 import { openDatabase } from "../../db";
 import { systemDesktop } from "../../dm";
-import { MESSAGES_DIR, seedMessages } from "../../messages";
+import { seedMessages } from "../../messages";
 import { Waitlist } from "../../waitlist";
 import { aiRoutes } from "../ai";
 import { createApi } from "../api";
@@ -35,10 +35,10 @@ try {
   console.error((err as Error).message);
   process.exit(1);
 }
-const db = openDatabase(path.join(ROOT, ".cold", "cold.db"));
+const db = await openDatabase(path.join(ROOT, ".cold", "cold.db"));
 const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
 const waitlist = new Waitlist(db);
-const ctx = new WebContext({ root: ROOT, messagesDir: MESSAGES_DIR, db });
+const ctx = new WebContext({ root: ROOT, db });
 // In production the site and the app come ready from `bun run build` (the Dockerfile runs it), so the
 // server starts faster and smaller. Otherwise they're bundled now, so `bun run ui` shows your latest changes.
 const bundled = (process.env.NODE_ENV === "production" && readBundle(path.join(APP_ROOT, DIST))) || (await bundle(APP_ROOT));
@@ -53,6 +53,7 @@ let server: ReturnType<typeof Bun.serve>;
 const handler = createHandler({
   settings,
   assets,
+  version: assets.version,
   auth,
   waitlist,
   privateApi: createApi(ctx, aiRoutes(ctx)),
@@ -73,8 +74,8 @@ console.log(`cold is running at ${settings.publicUrl.href}   (Ctrl+C to stop)`);
 console.log(`  site  ${settings.publicUrl.href}`);
 console.log(`  app   ${appUrl}`);
 if (settings.mode === "hosted") console.log(`  data  ${ROOT}`);
-const firstRun = !auth.owner();
-const code = firstRun ? setup.issue() : undefined;
+const firstRun = !(await auth.owner());
+const code = firstRun ? await setup.issue() : undefined;
 if (settings.mode === "local" && !args.has("--no-open")) {
   const target = code ? `${appUrl}?setup=${code}` : appUrl;
   if (args.has("--window")) console.log(`  opened in ${systemDesktop.openWindow(target)}`);

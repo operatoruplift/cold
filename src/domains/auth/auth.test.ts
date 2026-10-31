@@ -1,22 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { openDatabase } from "../db";
-import { newSetupCode, OwnerAuth, parseCookies, passwordProblem, RateLimiter, sameSetupCode, sessionCookie } from ".";
+import { DbRateLimiter, newSetupCode, OwnerAuth, parseCookies, passwordProblem, RateLimiter, sameSetupCode, sessionCookie, type Limiter } from ".";
 
-const fresh = (now = () => new Date("2026-11-02T15:00:00Z")) => new OwnerAuth(openDatabase(":memory:"), { now });
+const fresh = async (now = () => new Date("2026-11-02T15:00:00Z")) => new OwnerAuth(await openDatabase(":memory:"), { now });
 
 describe("OwnerAuth", () => {
   test("has no owner until one is set, then verifies only that email and password", async () => {
-    const auth = fresh();
-    expect(auth.owner()).toBeUndefined();
+    const auth = await fresh();
+    expect(await auth.owner()).toBeUndefined();
     await auth.setOwner(" Me@Cold.dev ", "correct horse battery");
-    expect(auth.owner()).toEqual({ email: "me@cold.dev", managedByEnv: false });
+    expect(await auth.owner()).toEqual({ email: "me@cold.dev", managedByEnv: false });
     expect(await auth.verify("ME@cold.dev", "correct horse battery")).toBe(true);
     expect(await auth.verify("me@cold.dev", "correct horse batter")).toBe(false);
     expect(await auth.verify("someone@else.dev", "correct horse battery")).toBe(false);
   });
 
   test("refuses weak passwords and bad emails", async () => {
-    const auth = fresh();
+    const auth = await fresh();
     await expect(auth.setOwner("me@cold.dev", "short")).rejects.toThrow("at least 12");
     await expect(auth.setOwner("not-an-email", "correct horse battery")).rejects.toThrow("valid email");
     expect(passwordProblem("aaaaaaaaaaaaaaaa")).toContain("different characters");
@@ -24,35 +24,35 @@ describe("OwnerAuth", () => {
 
   test("sessions are checked by token, expire, and end on sign-out or a password change", async () => {
     let now = new Date("2026-11-02T15:00:00Z");
-    const auth = fresh(() => now);
+    const auth = await fresh(() => now);
     await auth.setOwner("me@cold.dev", "correct horse battery");
-    const { token } = auth.createSession({ userAgent: "test", ip: "1.2.3.4" });
-    expect(auth.check(token)?.refreshed).toBe(false);
-    expect(auth.check("not-a-token")).toBeUndefined();
+    const { token } = await auth.createSession({ userAgent: "test", ip: "1.2.3.4" });
+    expect((await auth.check(token))?.refreshed).toBe(false);
+    expect(await auth.check("not-a-token")).toBeUndefined();
 
     // An active session is pushed forward, at most hourly.
     now = new Date("2026-11-03T15:00:00Z");
-    const later = auth.check(token)!;
+    const later = (await auth.check(token))!;
     expect(later.refreshed).toBe(true);
     expect(later.expiresAt.toISOString()).toBe("2026-12-03T15:00:00.000Z");
 
     // Thirty idle days end it.
     now = new Date("2027-01-10T15:00:00Z");
-    expect(auth.check(token)).toBeUndefined();
+    expect(await auth.check(token)).toBeUndefined();
 
-    const second = auth.createSession().token;
-    const third = auth.createSession().token;
-    expect(auth.revokeOthers(second)).toBe(1);
-    expect(auth.check(third)).toBeUndefined();
-    expect(auth.sessions(second).find((s) => s.current)).toBeDefined();
+    const second = (await auth.createSession()).token;
+    const third = (await auth.createSession()).token;
+    expect(await auth.revokeOthers(second)).toBe(1);
+    expect(await auth.check(third)).toBeUndefined();
+    expect((await auth.sessions(second)).find((s) => s.current)).toBeDefined();
     await auth.setOwner("me@cold.dev", "a brand new password");
-    expect(auth.check(second)).toBeUndefined();
+    expect(await auth.check(second)).toBeUndefined();
   });
 
   test("an owner from the environment cannot be changed in the app", async () => {
     const passwordHash = await Bun.password.hash("correct horse battery", { algorithm: "argon2id" });
-    const auth = new OwnerAuth(openDatabase(":memory:"), { envOwner: OwnerAuth.envOwner({ COLD_OWNER_EMAIL: "Me@Cold.dev", COLD_OWNER_PASSWORD_HASH: passwordHash }) });
-    expect(auth.owner()).toEqual({ email: "me@cold.dev", managedByEnv: true });
+    const auth = new OwnerAuth(await openDatabase(":memory:"), { envOwner: OwnerAuth.envOwner({ COLD_OWNER_EMAIL: "Me@Cold.dev", COLD_OWNER_PASSWORD_HASH: passwordHash }) });
+    expect(await auth.owner()).toEqual({ email: "me@cold.dev", managedByEnv: true });
     expect(await auth.verify("me@cold.dev", "correct horse battery")).toBe(true);
     await expect(auth.setOwner("me@cold.dev", "another long password")).rejects.toThrow("COLD_OWNER_EMAIL");
     expect(() => OwnerAuth.envOwner({ COLD_OWNER_EMAIL: "me@cold.dev", COLD_OWNER_PASSWORD_HASH: "plaintext" })).toThrow("not the password itself");
@@ -68,16 +68,24 @@ describe("helpers", () => {
     expect(sameSetupCode("AAAA-BBBB-CCCC", code)).toBe(code === "AAAA-BBBB-CCCC");
   });
 
-  test("rate limiter allows the limit per window, then says how long to wait", () => {
-    let now = 0;
-    const limit = new RateLimiter(2, 60_000, () => now);
-    expect(limit.take("ip").ok).toBe(true);
-    expect(limit.take("ip").ok).toBe(true);
-    const third = limit.take("ip");
-    expect(third.ok).toBe(false);
-    expect(!third.ok && third.retryAfterSeconds).toBe(60);
-    now = 60_001;
-    expect(limit.take("ip").ok).toBe(true);
+  test("rate limiters allow the limit per window, then say how long to wait, in memory and in the database", async () => {
+    let now = 1_000_000;
+    const db = await openDatabase(":memory:");
+    const limiters: Limiter[] = [new RateLimiter(2, 60_000, () => now), new DbRateLimiter(db, 2, 60_000, () => now)];
+    for (const limit of limiters) {
+      now = 1_000_000;
+      expect((await limit.take("ip")).ok).toBe(true);
+      expect((await limit.take("ip")).ok).toBe(true);
+      expect((await limit.take("other")).ok).toBe(true);
+      const third = await limit.take("ip");
+      expect(third.ok).toBe(false);
+      expect(!third.ok && third.retryAfterSeconds).toBe(60);
+      now += 60_001;
+      expect((await limit.take("ip")).ok).toBe(true);
+      await limit.take("ip");
+      await limit.reset("ip");
+      expect((await limit.take("ip")).ok).toBe(true);
+    }
   });
 
   test("cookies", () => {

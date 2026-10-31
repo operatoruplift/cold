@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import {
   aiConfigured,
   aiModel,
@@ -29,7 +27,8 @@ import { buildVariables, renderForProspect } from "../../outreach";
 import { parseCsv, type Prospect } from "../../prospects";
 import { twentyClient } from "../../touches";
 import { HttpError, json, readBody, type Route } from "../api";
-import type { WebContext } from "../context";
+import { keepAlive } from "../background";
+import { OWN_LIST, type WebContext } from "../context";
 
 const offerOf = (offer?: Offer): AiOffer => ({
   audience: offer?.variables.audience,
@@ -81,18 +80,21 @@ export function aiRoutes(ctx: WebContext): Route[] {
    * database, where the app picks it up from /api/ai/runs/:id. No request waits
    * on Claude, so no proxy in front (Railway's, Vercel's) can time one out.
    */
-  function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: (runId: string) => Promise<AiResult<T>>): string {
+  async function background<T>(kind: AiRunKind, subject: string | undefined, input: unknown, work: (runId: string) => Promise<AiResult<T>>): Promise<string> {
     const ai = store();
-    const runId = ai.start(kind, subject, input);
-    void Promise.resolve()
-      .then(() => work(runId))
-      .then((result) => ai.finish(runId, result))
-      .catch((err) => ai.fail(runId, explainError(err).message));
+    const runId = await ai.start(kind, subject, input);
+    keepAlive(
+      Promise.resolve()
+        .then(() => work(runId))
+        .then((result) => ai.finish(runId, result))
+        .catch((err) => ai.fail(runId, explainError(err).message))
+        .catch((err) => console.error(`AI run ${runId} could not be saved:`, err)),
+    );
     return runId;
   }
 
-  function config(): ColdConfig {
-    const { config: c, error } = ctx.config();
+  async function config(): Promise<ColdConfig> {
+    const { config: c, error } = await ctx.config();
     if (!c) throw new HttpError(400, error ?? "cold.yaml has problems.");
     return c;
   }
@@ -110,14 +112,14 @@ export function aiRoutes(ctx: WebContext): Route[] {
     return prospect;
   }
 
-  const research = (key: string) => store().latest<Research>("research", key)?.output;
+  const research = async (key: string) => (await store().latest<Research>("research", key))?.output;
 
   /** The due step of a campaign for one prospect, as the template writes it. */
   async function dueMessage(campaignId: string, prospectKey: string) {
-    const campaign = ctx.campaigns.get(campaignId);
+    const campaign = await ctx.campaigns.get(campaignId);
     if (!campaign) throw new HttpError(404, "No such campaign.");
-    const c = config();
-    const sequence = findSequence(ctx.library().library, campaign.sequence);
+    const c = await config();
+    const sequence = findSequence((await ctx.library()).library, campaign.sequence);
     if (!sequence) throw new HttpError(400, `There is no sequence "${campaign.sequence}" in the library.`);
     const account = c.accounts[campaign.account];
     if (!account) throw new HttpError(400, `There is no account "${campaign.account}".`);
@@ -130,7 +132,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
         : (await prepareDmRun({ sequence, account, offer, prospects, store: touchStore, now: () => ctx.now() })).plan;
     const item = plan.due.find((d) => d.prospect.key === prospectKey);
     if (!item) throw new HttpError(409, "This prospect has nothing due right now.");
-    const found = research(item.prospect.key);
+    const found = await research(item.prospect.key);
     const variables = buildVariables(account, offer, item.prospect);
     // A researched trigger fills an empty {{trigger}}, so the template has its one true personal line.
     if (!variables.trigger && found?.best_trigger) variables.trigger = found.best_trigger;
@@ -142,21 +144,21 @@ export function aiRoutes(ctx: WebContext): Route[] {
     [
       "GET",
       /^\/api\/ai\/status$/,
-      () => {
+      async () => {
         const since = new Date(ctx.now().getTime() - 30 * 86_400_000);
         return json({
           configured: aiConfigured(),
           model: aiModel(),
-          usage: ctx.ai?.usageSince(since),
-          finds: (ctx.ai?.recent("find", 12) ?? []).map((r) => ({ id: r.id, status: r.status, input: r.input, createdAt: r.createdAt, found: (r.output as FindResult | undefined)?.prospects?.length ?? 0, error: r.error })),
+          usage: await ctx.ai?.usageSince(since),
+          finds: ((await ctx.ai?.recent("find", 12)) ?? []).map((r) => ({ id: r.id, status: r.status, input: r.input, createdAt: r.createdAt, found: (r.output as FindResult | undefined)?.prospects?.length ?? 0, error: r.error })),
         });
       },
     ],
     [
       "GET",
       /^\/api\/ai\/runs\/([\w-]+)$/,
-      (_request, [id]) => {
-        const found = store().get(id!);
+      async (_request, [id]) => {
+        const found = await store().get(id!);
         return found ? json(found) : json({ error: "No such AI run." }, 404);
       },
     ],
@@ -167,7 +169,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const body = await readBody<{ offer?: string; area?: string; count?: number; notes?: string; exclude?: string }>(request);
         const area = body.area?.trim();
         if (!area) throw new HttpError(400, "Say where to look: a city, a region, or online.");
-        const c = config();
+        const c = await config();
         const offer = body.offer ? c.offers[body.offer] : getOffer(c, undefined);
         if (body.offer && !offer) throw new HttpError(400, `There is no offer "${body.offer}".`);
         const exclude: string[] = [];
@@ -180,7 +182,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const call = ctx.claude();
         const count = Math.max(1, Math.min(15, Number(body.count) || 8));
         const input = { offer: offer?.key, area, count, notes: body.notes, exclude: body.exclude };
-        const runId = background("find", area, input, () => findProspects({ call, offer: offerOf(offer), area, count, notes: body.notes, exclude }));
+        const runId = await background("find", area, input, () => findProspects({ call, offer: offerOf(offer), area, count, notes: body.notes, exclude }));
         return json({ runId }, 202);
       },
     ],
@@ -189,18 +191,18 @@ export function aiRoutes(ctx: WebContext): Route[] {
       /^\/api\/ai\/prospects\/save$/,
       async (request) => {
         const body = await readBody<{ runId: string; picks: number[]; list?: string }>(request);
-        const found = store().get(body.runId);
+        const found = await store().get(body.runId);
         const output = found?.output as FindResult | undefined;
         if (!found || found.kind !== "find" || !output) throw new HttpError(404, "That search is not finished, or does not exist.");
         const picked = (body.picks ?? []).map((i) => output.prospects[i]).filter((p): p is NonNullable<typeof p> => !!p);
         if (!picked.length) throw new HttpError(400, "Pick at least one prospect to save.");
         const slug = (body.list ?? "ai").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "ai";
         const file = `prospects-${slug}.csv`;
-        const full = path.join(ctx.root, file);
         let headers = [...AI_COLUMNS];
         let rows: Array<Record<string, string | undefined>> = [];
-        if (existsSync(full)) {
-          const [head = [], ...rest] = parseCsv(readFileSync(full, "utf8"));
+        const existing = await ctx.files.read(file);
+        if (existing !== undefined) {
+          const [head = [], ...rest] = parseCsv(existing);
           headers = [...head, ...AI_COLUMNS.filter((c) => !head.includes(c))];
           rows = rest.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
         }
@@ -233,7 +235,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
           [p.company.toLowerCase(), host(p.website), p.email?.toLowerCase()].forEach((k) => k && known.add(k));
           added++;
         }
-        writeFileSync(full, csvText(headers, rows));
+        await ctx.files.write(file, csvText(headers, rows));
         ctx.invalidate();
         return json({ source: `csv:${file}`, file, added, skipped, total: rows.length });
       },
@@ -244,10 +246,10 @@ export function aiRoutes(ctx: WebContext): Route[] {
       async (request) => {
         const body = await readBody<{ source: string; prospect: string; offer?: string }>(request);
         const prospect = await prospectFrom(body.source, body.prospect);
-        const c = config();
+        const c = await config();
         const offer = body.offer ? c.offers[body.offer] : getOffer(c, undefined);
         const call = ctx.claude();
-        const runId = background("research", prospect.key, { source: body.source, prospect: prospect.key, label: prospect.label }, () =>
+        const runId = await background("research", prospect.key, { source: body.source, prospect: prospect.key, label: prospect.label }, () =>
           researchProspect({ call, offer: offerOf(offer), prospect: prospectOf(prospect) }),
         );
         return json({ runId }, 202);
@@ -256,9 +258,9 @@ export function aiRoutes(ctx: WebContext): Route[] {
     [
       "GET",
       /^\/api\/ai\/research$/,
-      (_request, _params, url) => {
+      async (_request, _params, url) => {
         const keys = (url.searchParams.get("keys") ?? "").split(",").map((k) => k.trim()).filter(Boolean).slice(0, 2000);
-        const latest = store().latestFor<Research>("research", keys);
+        const latest = await store().latestFor<Research>("research", keys);
         return json(Object.fromEntries([...latest].map(([key, r]) => [key, { runId: r.id, createdAt: r.createdAt, output: r.output }])));
       },
     ],
@@ -271,11 +273,10 @@ export function aiRoutes(ctx: WebContext): Route[] {
         if (!trigger) throw new HttpError(400, "There is no trigger to save.");
         const prospect = await prospectFrom(body.source, body.prospect);
         if (body.source.startsWith("csv:")) {
-          const file = ctx.resolveSource(body.source).slice(4);
+          const { text, path: file } = await ctx.csv(body.source);
           // Only your own lists are written to: never the bundled example, never a file outside your folder.
-          const own = path.dirname(path.resolve(file)) === path.resolve(ctx.root) && /^prospects.*\.csv$/i.test(path.basename(file));
-          if (!own) throw new HttpError(400, "Triggers are saved to your own lists (prospects-*.csv). Upload this list or save an AI search as a list, then research it there.");
-          const [head = [], ...rest] = parseCsv(readFileSync(file, "utf8"));
+          if (!file || !OWN_LIST.test(file)) throw new HttpError(400, "Triggers are saved to your own lists (prospects-*.csv). Upload this list or save an AI search as a list, then research it there.");
+          const [head = [], ...rest] = parseCsv(text);
           const headers = head.includes("trigger") ? head : [...head, "trigger"];
           const rows = rest.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])) as Record<string, string | undefined>);
           const idColumn = head.find((h) => h.trim().toLowerCase() === "id");
@@ -283,7 +284,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
           const target = rows[index] ?? rows.find((r) => r.email?.trim().toLowerCase() === prospect.email);
           if (!target) throw new HttpError(409, "Could not find that row in the CSV. Add the trigger by hand.");
           target.trigger = trigger;
-          writeFileSync(file, csvText(headers, rows));
+          await ctx.files.write(file, csvText(headers, rows));
         } else if (body.source === "twenty:people" && prospect.links.personId) {
           const client = twentyClient();
           if (!client) throw new HttpError(400, "Twenty is not connected.");
@@ -304,7 +305,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const { campaign, sequence, account, offer, item, rendered } = due;
         const call = ctx.claude();
         const step = item.step.step ?? 1;
-        const runId = background("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, async (id) => {
+        const runId = await background("draft", `${campaign.id}|${item.prospect.key}|${step}`, { campaign: campaign.id, prospect: item.prospect.key, step }, async (id) => {
           const result = await draftMessage({
             call,
             channel: sequence.channel === "email" ? "email" : "dm",
@@ -317,7 +318,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
             threaded: sequence.channel === "email" && !item.first,
           });
           const out = result.output;
-          const draft = store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: out.subject ?? rendered.subject, body: out.body, status: "draft", runId: id });
+          const draft = await store().saveDraft({ campaignId: campaign.id, prospectKey: item.prospect.key, step, subject: out.subject ?? rendered.subject, body: out.body, status: "draft", runId: id });
           return { ...result, output: { draft, changes: out.changes, personalLine: out.personal_line, template: { subject: rendered.subject, body: rendered.body, missing: rendered.missing }, researched: !!due.research } };
         });
         return json({ runId }, 202);
@@ -326,27 +327,27 @@ export function aiRoutes(ctx: WebContext): Route[] {
     [
       "GET",
       /^\/api\/ai\/drafts$/,
-      (_request, _params, url) => json(store().drafts(url.searchParams.get("campaignId") ?? "")),
+      async (_request, _params, url) => json(await store().drafts(url.searchParams.get("campaignId") ?? "")),
     ],
     [
       "PUT",
       /^\/api\/ai\/drafts$/,
       async (request) => {
         const body = await readBody<{ campaignId: string; prospect: string; step: number; subject?: string; body: string; status: "draft" | "approved" }>(request);
-        if (!ctx.campaigns.get(body.campaignId)) throw new HttpError(404, "No such campaign.");
+        if (!(await ctx.campaigns.get(body.campaignId))) throw new HttpError(404, "No such campaign.");
         const text = (body.body ?? "").trim();
         if (!text) throw new HttpError(400, "The message is empty.");
         if (/\{\{|\}\}/.test(`${body.subject ?? ""} ${text}`)) throw new HttpError(400, "The message still has a {{variable}} in it. Replace it with real words.");
         if (body.status !== "draft" && body.status !== "approved") throw new HttpError(400, "Status is draft or approved.");
-        return json(store().saveDraft({ campaignId: body.campaignId, prospectKey: body.prospect, step: Number(body.step) || 1, subject: body.subject?.trim() || undefined, body: text, status: body.status }));
+        return json(await store().saveDraft({ campaignId: body.campaignId, prospectKey: body.prospect, step: Number(body.step) || 1, subject: body.subject?.trim() || undefined, body: text, status: body.status }));
       },
     ],
     [
       "DELETE",
       /^\/api\/ai\/drafts$/,
-      (_request, _params, url) => {
+      async (_request, _params, url) => {
         const p = url.searchParams;
-        return json({ ok: store().deleteDraft(p.get("campaignId") ?? "", p.get("prospect") ?? "", Number(p.get("step")) || 1) });
+        return json({ ok: await store().deleteDraft(p.get("campaignId") ?? "", p.get("prospect") ?? "", Number(p.get("step")) || 1) });
       },
     ],
     [
@@ -354,8 +355,8 @@ export function aiRoutes(ctx: WebContext): Route[] {
       /^\/api\/ai\/call$/,
       async (request) => {
         const body = await readBody<{ script: string; source?: string; prospect?: string; account?: string; offer?: string }>(request);
-        const c = config();
-        const library = ctx.library().library;
+        const c = await config();
+        const library = (await ctx.library()).library;
         const script = library.callScripts.find((s) => s.id === body.script);
         if (!script) throw new HttpError(404, "No such call script.");
         const account = Object.values(c.accounts).find((a) => (body.account ? a.key === body.account : a.voice === script.voice));
@@ -364,8 +365,8 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const prospect = body.source && body.prospect ? await prospectFrom(body.source, body.prospect) : undefined;
         const sheet = callSheetData(script, library, account, offer, prospect);
         const call = ctx.claude();
-        const known = prospect ? research(prospect.key) : undefined;
-        const runId = background("call", prospect?.key ?? script.id, { script: script.id, prospect: prospect?.key }, async () => {
+        const known = prospect ? await research(prospect.key) : undefined;
+        const runId = await background("call", prospect?.key ?? script.id, { script: script.id, prospect: prospect?.key }, async () => {
           const result = await prepCall({
             call,
             sender: senderOf(account),
@@ -386,12 +387,12 @@ export function aiRoutes(ctx: WebContext): Route[] {
         const body = await readBody<{ messageId?: string; prospectKey: string; prospectLabel?: string; subject?: string; body: string; account?: string }>(request);
         const text = (body.body ?? "").trim();
         if (!text) throw new HttpError(400, "There is no reply text to read.");
-        const c = config();
+        const c = await config();
         const account = (body.account && c.accounts[body.account]) || Object.values(c.accounts)[0];
         if (!account) throw new HttpError(400, "cold.yaml has no accounts.");
         const subject = body.messageId || createHash("sha1").update(text).digest("hex");
         const call = ctx.claude();
-        const runId = background<Triage>("triage", subject, { prospect: body.prospectKey, messageId: body.messageId }, () =>
+        const runId = await background<Triage>("triage", subject, { prospect: body.prospectKey, messageId: body.messageId }, () =>
           triageReply({ call, sender: senderOf(account), offer: offerOf(getOffer(c, undefined)), prospect: { name: body.prospectLabel ?? body.prospectKey }, reply: { subject: body.subject, body: text } }),
         );
         return json({ runId, id: subject }, 202);
@@ -400,9 +401,9 @@ export function aiRoutes(ctx: WebContext): Route[] {
     [
       "GET",
       /^\/api\/ai\/triage$/,
-      (_request, _params, url) => {
+      async (_request, _params, url) => {
         const ids = (url.searchParams.get("ids") ?? "").split(",").map((k) => k.trim()).filter(Boolean).slice(0, 1000);
-        const latest = store().latestFor<Triage>("triage", ids);
+        const latest = await store().latestFor<Triage>("triage", ids);
         return json(Object.fromEntries([...latest].map(([id, r]) => [id, r.output])));
       },
     ],
@@ -412,7 +413,7 @@ export function aiRoutes(ctx: WebContext): Route[] {
       async (request) => {
         const body = await readBody<{ prospectKey: string; prospectLabel?: string; account?: string; sequence?: string; address?: string }>(request);
         if (!body.prospectKey) throw new HttpError(400, "Which prospect?");
-        const touchStore = await ctx.store(config());
+        const touchStore = await ctx.store(await config());
         await touchStore.record({
           kind: "OPTED_OUT",
           channel: "EMAIL",

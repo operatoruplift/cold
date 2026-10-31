@@ -25,9 +25,7 @@ export async function loadProspects(source: string, options: LoadOptions = {}): 
     const file = path.resolve(kind === "csv" ? target : source);
     if (!existsSync(file)) throw new Error(`No CSV at ${file}`);
     if (options.where) throw new Error("--where filters Twenty sources; filter the CSV itself instead");
-    const [headers, ...rows] = parseCsv(readFileSync(file, "utf8"));
-    if (!headers) return [];
-    return rows.slice(0, options.limit ?? rows.length).map((row, i) => fromCsvRow(headers, row, i));
+    return prospectsFromCsv(readFileSync(file, "utf8"), options.limit);
   }
 
   if (kind !== "twenty") throw new Error(`Unknown source "${source}". Use ${SOURCES_HELP}.`);
@@ -52,6 +50,13 @@ export async function loadProspects(source: string, options: LoadOptions = {}): 
     default:
       throw new Error(`Unknown Twenty source "${target}". Use ${SOURCES_HELP}.`);
   }
+}
+
+/** The prospects in CSV text: a header row, then one prospect per row. */
+export function prospectsFromCsv(text: string, limit?: number): Prospect[] {
+  const [headers, ...rows] = parseCsv(text);
+  if (!headers) return [];
+  return rows.slice(0, limit ?? rows.length).map((row, i) => fromCsvRow(headers, row, i));
 }
 
 /** Pick one prospect by key, any identity, email, or a case-insensitive name/company match. */

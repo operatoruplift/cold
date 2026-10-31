@@ -8,8 +8,9 @@ import type { TouchStore } from "./types";
 
 export * from "./types";
 export * from "./helpers";
+export { DbStore } from "./dbStore";
 export { FileStore } from "./fileStore";
-export { TouchNotSavedError, TwentyStore, touchName } from "./twentyStore";
+export { fileJournal, filesJournal, TouchNotSavedError, TwentyStore, touchName, type Journal } from "./twentyStore";
 
 /** The Twenty client when TWENTY_BASE_URL and TWENTY_API_KEY are set. */
 export function twentyClient(): TwentyClient | undefined {

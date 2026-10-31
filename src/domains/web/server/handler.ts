@@ -7,7 +7,9 @@ import {
   sameSetupCode,
   SESSION_COOKIE,
   sessionCookie,
+  type Limiter,
 } from "../../auth";
+import type { Db } from "../../db";
 import { parseSignup, Waitlist } from "../../waitlist";
 import { refuseRequest } from "../guard";
 import type { SessionResponse, SessionsResponse, WaitlistResponse } from "../types";
@@ -16,10 +18,18 @@ import type { ServerSettings } from "./settings";
 
 /**
  * The one-time code that lets the first visitor create the owner login. It is
- * printed where the server runs, so only someone who can see that output can
- * use it. Twenty wrong tries replace it with a new one.
+ * printed where the server runs (the terminal, or Vercel's logs), so only
+ * someone who can see that output can use it. Twenty wrong tries replace it
+ * with a new one.
  */
-export class SetupCode {
+export interface SetupCodes {
+  issue(): Promise<string>;
+  check(given: string): Promise<boolean>;
+  clear(): Promise<void>;
+}
+
+/** The code in this server's memory: right for one server on your computer. */
+export class SetupCode implements SetupCodes {
   private code?: string;
   private failures = 0;
 
@@ -29,35 +39,84 @@ export class SetupCode {
     return this.code !== undefined;
   }
 
-  issue(): string {
+  async issue(): Promise<string> {
     this.code = newSetupCode();
     this.failures = 0;
     this.announce(this.code);
     return this.code;
   }
 
-  check(given: string): boolean {
+  async check(given: string): Promise<boolean> {
     if (!this.code) return false;
     if (sameSetupCode(given, this.code)) return true;
-    if (++this.failures >= 20) this.issue();
+    if (++this.failures >= 20) await this.issue();
     return false;
   }
 
-  clear(): void {
+  async clear(): Promise<void> {
     this.code = undefined;
+  }
+}
+
+/** The code in the database, so every copy of the server (Vercel runs several) knows the same one. */
+export class DbSetupCode implements SetupCodes {
+  constructor(
+    private readonly db: Db,
+    private readonly announce: (code: string) => void,
+  ) {}
+
+  private async current(): Promise<string | undefined> {
+    return (await this.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'setup_code'"))?.value;
+  }
+
+  /** At start, while there is no login: say the code (a new one the first time), so it is in the logs. */
+  async announceIfNeeded(): Promise<void> {
+    const code = await this.current();
+    if (code) this.announce(code);
+    else await this.issue();
+  }
+
+  async issue(): Promise<string> {
+    const code = newSetupCode();
+    await this.db.batch([
+      ["INSERT INTO meta (key, value) VALUES ('setup_code', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", code],
+      ["INSERT INTO meta (key, value) VALUES ('setup_failures', '0') ON CONFLICT (key) DO UPDATE SET value = '0'"],
+    ]);
+    this.announce(code);
+    return code;
+  }
+
+  async check(given: string): Promise<boolean> {
+    const code = await this.current();
+    if (!code) return false;
+    if (sameSetupCode(given, code)) return true;
+    const row = await this.db.get<{ value: string }>(
+      "INSERT INTO meta (key, value) VALUES ('setup_failures', '1') ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) RETURNING value",
+    );
+    if (Number(row?.value) >= 20) await this.issue();
+    return false;
+  }
+
+  async clear(): Promise<void> {
+    await this.db.run("DELETE FROM meta WHERE key IN ('setup_code', 'setup_failures')");
   }
 }
 
 export interface HandlerDeps {
   settings: ServerSettings;
-  assets: BuiltAssets;
+  /** The site and app pages and their files. Without them (on Vercel, where the CDN serves them) only /api is answered. */
+  assets?: BuiltAssets;
+  /** This build, for /api/health. */
+  version: string;
   auth: OwnerAuth;
   waitlist: Waitlist;
   /** Everything behind the login: campaigns, sending, AI, settings. */
   privateApi: (request: Request) => Promise<Response>;
-  setup: SetupCode;
+  setup: SetupCodes;
   /** The client's address (the socket's, unless a trusted proxy says otherwise). */
   clientIp: (request: Request) => string | undefined;
+  /** Rate limit counters: in memory by default, in the database when several servers share the work. */
+  limiter?: (limit: number, windowMs: number) => Limiter;
   now?: () => Date;
 }
 
@@ -86,8 +145,8 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
 
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 
-function limited(limiter: RateLimiter, key: string): void {
-  const result = limiter.take(key);
+async function limited(limiter: Limiter, key: string): Promise<void> {
+  const result = await limiter.take(key);
   if (!result.ok) {
     const minutes = Math.max(1, Math.ceil(result.retryAfterSeconds / 60));
     throw new HttpError(429, `Too many tries. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`, { "retry-after": String(result.retryAfterSeconds) });
@@ -100,13 +159,14 @@ function limited(limiter: RateLimiter, key: string): void {
  * the owner's session cookie, or gets a 401.
  */
 export function createHandler(deps: HandlerDeps): (request: Request) => Promise<Response> {
-  const { settings, assets, auth, waitlist, setup } = deps;
+  const { settings, assets, auth, waitlist, setup, version } = deps;
   const now = () => deps.now?.() ?? new Date();
-  const loginLimit = new RateLimiter(10, 15 * 60_000);
-  const setupLimit = new RateLimiter(10, 15 * 60_000);
-  const waitlistLimit = new RateLimiter(8, 60 * 60_000);
+  const limiter = deps.limiter ?? ((limit: number, windowMs: number) => new RateLimiter(limit, windowMs));
+  const loginLimit = limiter(10, 15 * 60_000);
+  const setupLimit = limiter(10, 15 * 60_000);
+  const waitlistLimit = limiter(8, 60 * 60_000);
   // A ceiling across everyone, so a botnet cannot fill the database.
-  const waitlistDaily = new RateLimiter(5000, 24 * 60 * 60_000);
+  const waitlistDaily = limiter(5000, 24 * 60 * 60_000);
   const secure = settings.secureCookies;
   const csp = [
     "default-src 'self'",
@@ -137,13 +197,13 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     return response;
   }
 
-  function sessionState(signedIn: boolean): SessionResponse {
-    const owner = auth.owner();
-    return { signedIn, owner: signedIn ? owner : undefined, setupRequired: !owner, mode: settings.mode, version: assets.version };
+  async function sessionState(signedIn: boolean): Promise<SessionResponse> {
+    const owner = await auth.owner();
+    return { signedIn, owner: signedIn ? owner : undefined, setupRequired: !owner, mode: settings.mode, version };
   }
 
-  function startSession(request: Request, ip: string | undefined): Record<string, string> {
-    const { token, expiresAt } = auth.createSession({ userAgent: request.headers.get("user-agent"), ip });
+  async function startSession(request: Request, ip: string | undefined): Promise<Record<string, string>> {
+    const { token, expiresAt } = await auth.createSession({ userAgent: request.headers.get("user-agent"), ip });
     return { "set-cookie": sessionCookie(token, expiresAt, secure, now()) };
   }
 
@@ -154,46 +214,46 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
 
     switch (route) {
       case "GET /api/health":
-        return json({ ok: true, version: assets.version });
+        return json({ ok: true, version });
       case "GET /api/session": {
-        const session = auth.check(token);
-        return json(sessionState(!!session), 200, session?.refreshed && token ? { "set-cookie": sessionCookie(token, session.expiresAt, secure, now()) } : {});
+        const session = await auth.check(token);
+        return json(await sessionState(!!session), 200, session?.refreshed && token ? { "set-cookie": sessionCookie(token, session.expiresAt, secure, now()) } : {});
       }
       case "POST /api/session/login": {
-        limited(loginLimit, `login:${ip ?? "?"}`);
+        await limited(loginLimit, `login:${ip ?? "?"}`);
         const body = await readJson(request);
-        if (!auth.owner()) throw new HttpError(409, "There is no login yet. Create one with the setup code first.");
+        if (!(await auth.owner())) throw new HttpError(409, "There is no login yet. Create one with the setup code first.");
         if (!(await auth.verify(str(body.email), str(body.password)))) throw new HttpError(401, "That email and password do not match.");
-        loginLimit.reset(`login:${ip ?? "?"}`);
-        return json(sessionState(true), 200, startSession(request, ip));
+        await loginLimit.reset(`login:${ip ?? "?"}`);
+        return json(await sessionState(true), 200, await startSession(request, ip));
       }
       case "POST /api/session/setup": {
-        limited(setupLimit, `setup:${ip ?? "?"}`);
+        await limited(setupLimit, `setup:${ip ?? "?"}`);
         const body = await readJson(request);
-        if (auth.owner()) throw new HttpError(409, "The owner login already exists. Sign in instead.");
-        if (!setup.check(str(body.code))) throw new HttpError(403, "That setup code is not right. Use the one printed where cold is running.");
+        if (await auth.owner()) throw new HttpError(409, "The owner login already exists. Sign in instead.");
+        if (!(await setup.check(str(body.code)))) throw new HttpError(403, "That setup code is not right. Use the one printed where cold is running.");
         try {
           await auth.setOwner(str(body.email), str(body.password));
         } catch (err) {
           throw new HttpError(400, (err as Error).message);
         }
-        setup.clear();
-        return json(sessionState(true), 201, startSession(request, ip));
+        await setup.clear();
+        return json(await sessionState(true), 201, await startSession(request, ip));
       }
       case "POST /api/session/logout":
-        auth.revoke(token);
-        return json(sessionState(false), 200, { "set-cookie": clearedSessionCookie(secure) });
+        await auth.revoke(token);
+        return json(await sessionState(false), 200, { "set-cookie": clearedSessionCookie(secure) });
       case "POST /api/waitlist": {
         const parsed = parseSignup(await readJson(request));
         if (parsed.error) throw new HttpError(400, parsed.error);
-        limited(waitlistLimit, `waitlist:${ip ?? "?"}`);
-        limited(waitlistDaily, "waitlist:all");
-        if (parsed.signup) waitlist.join(parsed.signup, { ip, userAgent: request.headers.get("user-agent") });
+        await limited(waitlistLimit, `waitlist:${ip ?? "?"}`);
+        await limited(waitlistDaily, "waitlist:all");
+        if (parsed.signup) await waitlist.join(parsed.signup, { ip, userAgent: request.headers.get("user-agent") });
         return json({ ok: true, message: "You're on the list. We'll be in touch." }, 201);
       }
     }
 
-    const session = auth.check(token);
+    const session = await auth.check(token);
     if (!session || !token) return json({ error: "Sign in first.", signedIn: false }, 401);
     const response = await privateRoute(request, url, route, token, ip);
     if (session.refreshed && !response.headers.has("set-cookie")) response.headers.append("set-cookie", sessionCookie(token, session.expiresAt, secure, now()));
@@ -203,15 +263,15 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
   async function privateRoute(request: Request, url: URL, route: string, token: string, ip: string | undefined): Promise<Response> {
     switch (route) {
       case "GET /api/session/list":
-        return json({ sessions: auth.sessions(token) } satisfies SessionsResponse);
+        return json({ sessions: await auth.sessions(token) } satisfies SessionsResponse);
       case "POST /api/session/revoke-others": {
-        const ended = auth.revokeOthers(token);
+        const ended = await auth.revokeOthers(token);
         return json({ ok: true, message: ended ? `Signed out ${ended} other session${ended === 1 ? "" : "s"}.` : "There were no other sessions." });
       }
       case "POST /api/session/password": {
-        limited(loginLimit, `login:${ip ?? "?"}`);
+        await limited(loginLimit, `login:${ip ?? "?"}`);
         const body = await readJson(request);
-        const owner = auth.owner();
+        const owner = await auth.owner();
         if (!owner) throw new HttpError(409, "There is no owner login.");
         if (owner.managedByEnv) throw new HttpError(409, "The login is set by COLD_OWNER_EMAIL and COLD_OWNER_PASSWORD_HASH on the server; change it there.");
         const current = str(body.current);
@@ -221,12 +281,12 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
         } catch (err) {
           throw new HttpError(400, (err as Error).message);
         }
-        return json({ ok: true, message: "Saved. Every other session was signed out." }, 200, startSession(request, ip));
+        return json({ ok: true, message: "Saved. Every other session was signed out." }, 200, await startSession(request, ip));
       }
       case "GET /api/waitlist":
-        return json({ entries: waitlist.list({ q: url.searchParams.get("q") ?? undefined, status: url.searchParams.get("status") ?? undefined }), counts: waitlist.counts() } satisfies WaitlistResponse);
+        return json({ entries: await waitlist.list({ q: url.searchParams.get("q") ?? undefined, status: url.searchParams.get("status") ?? undefined }), counts: await waitlist.counts() } satisfies WaitlistResponse);
       case "GET /api/waitlist.csv":
-        return new Response(waitlist.csv(), {
+        return new Response(await waitlist.csv(), {
           headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="cold-waitlist-${now().toISOString().slice(0, 10)}.csv"`, "cache-control": "no-store" },
         });
     }
@@ -236,12 +296,12 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       if (request.method === "PATCH") {
         const body = await readJson(request);
         try {
-          return json(waitlist.update(id, { status: typeof body.status === "string" ? body.status : undefined, ownerNote: typeof body.ownerNote === "string" ? body.ownerNote : undefined }));
+          return json(await waitlist.update(id, { status: typeof body.status === "string" ? body.status : undefined, ownerNote: typeof body.ownerNote === "string" ? body.ownerNote : undefined }));
         } catch (err) {
           throw new HttpError(404, (err as Error).message);
         }
       }
-      if (request.method === "DELETE") return waitlist.remove(id) ? json({ ok: true, message: "Removed from the waitlist." }) : json({ error: "No such person on the waitlist." }, 404);
+      if (request.method === "DELETE") return (await waitlist.remove(id)) ? json({ ok: true, message: "Removed from the waitlist." }) : json({ error: "No such person on the waitlist." }, 404);
     }
     return deps.privateApi(request);
   }
@@ -261,6 +321,7 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
       }
     }
 
+    if (!assets) return harden(new Response("Not found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } }));
     if (request.method !== "GET" && request.method !== "HEAD") return harden(new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } }));
     const page = (html: string) => harden(new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } }), true);
     if (url.pathname === "/" || url.pathname === "/index.html") return page(assets.pages.site);

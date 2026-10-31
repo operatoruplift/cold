@@ -1,13 +1,16 @@
 import { cpSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { APP_ROOT } from "../config/root";
+import type { Files } from "../storage";
 import { lintMessage, lintObjections, lintSequences, toMessage, toSequences } from "./helpers";
 import type { Library, LintIssue, Message, Sequence } from "./types";
 
 export * from "./types";
 export * from "./helpers";
 
-const BUNDLED_MESSAGES = path.resolve(import.meta.dir, "../../../messages");
+/** The library that ships with COLD. */
+export const BUNDLED_MESSAGES = path.join(APP_ROOT, "messages");
 
 /** messages/ in the repository, or a copy under COLD_HOME so edits made on a server outlive a redeploy. */
 export const MESSAGES_DIR = process.env.COLD_HOME ? path.join(path.resolve(process.env.COLD_HOME), "messages") : BUNDLED_MESSAGES;
@@ -25,19 +28,18 @@ function walk(dir: string): string[] {
 }
 
 /**
- * Read every message under messages/ and lint it. Messages with errors are
- * left out of the library and reported in `issues`, so a broken file never
- * gets sent.
+ * Lint every message and build the library from the files under messages/
+ * (paths inside it, with their text). Messages with errors are left out and
+ * reported in `issues`, so a broken file never gets sent.
  */
-export function loadLibrary(root = MESSAGES_DIR): { library: Library; issues: LintIssue[] } {
+function buildLibrary(sources: Map<string, string>): { library: Library; issues: LintIssue[] } {
   const issues: LintIssue[] = [];
   const messages: Message[] = [];
-  const display = (file: string) => path.join("messages", path.relative(root, file));
+  const display = (rel: string) => `messages/${rel}`;
 
-  for (const file of walk(root).sort()) {
-    const rel = path.relative(root, file).split(path.sep).join("/");
-    if (!rel.endsWith(".md") || rel === "README.md" || path.basename(rel) === "README.md") continue;
-    const { message, issues: found } = toMessage(rel, readFileSync(file, "utf8"), display(file));
+  for (const rel of [...sources.keys()].sort()) {
+    if (!rel.endsWith(".md") || path.posix.basename(rel) === "README.md") continue;
+    const { message, issues: found } = toMessage(rel, sources.get(rel)!, display(rel));
     issues.push(...found);
     if (!message) continue;
     const lint = lintMessage(message);
@@ -48,10 +50,10 @@ export function loadLibrary(root = MESSAGES_DIR): { library: Library; issues: Li
   const sequences = toSequences(messages);
   issues.push(...lintSequences(sequences));
 
-  const objectionsFile = path.join(root, "call", "objections.yaml");
   let objections: Library["objections"] = [];
-  if (existsSync(objectionsFile)) {
-    const result = lintObjections(parse(readFileSync(objectionsFile, "utf8")), display(objectionsFile));
+  const objectionsSource = sources.get("call/objections.yaml");
+  if (objectionsSource !== undefined) {
+    const result = lintObjections(parse(objectionsSource), display("call/objections.yaml"));
     objections = result.objections;
     issues.push(...result.issues);
   }
@@ -60,6 +62,34 @@ export function loadLibrary(root = MESSAGES_DIR): { library: Library; issues: Li
     library: { messages, sequences, callScripts: messages.filter((m) => m.channel === "call"), objections },
     issues,
   };
+}
+
+const isLibraryFile = (rel: string) => rel.endsWith(".md") || rel === "call/objections.yaml";
+
+/** Read every message under a messages folder on disk and lint it. */
+export function loadLibrary(root = MESSAGES_DIR): { library: Library; issues: LintIssue[] } {
+  const sources = new Map<string, string>();
+  for (const file of walk(root)) {
+    const rel = path.relative(root, file).split(path.sep).join("/");
+    if (isLibraryFile(rel)) sources.set(rel, readFileSync(file, "utf8"));
+  }
+  return buildLibrary(sources);
+}
+
+/** The library from your files (messages/ in them): the database on a server without a disk. */
+export async function loadLibraryFrom(files: Files, dir = "messages"): Promise<{ library: Library; issues: LintIssue[] }> {
+  const sources = new Map<string, string>();
+  for (const [p, text] of await files.readAll(dir)) {
+    const rel = p.slice(dir.length + 1);
+    if (isLibraryFile(rel)) sources.set(rel, text);
+  }
+  return buildLibrary(sources);
+}
+
+/** On a server without a disk, start from a copy of the bundled library, as COLD_HOME does on disk. */
+export async function seedMessagesInto(files: Files, dir = "messages"): Promise<void> {
+  if ((await files.list(dir, { deep: true })).length) return;
+  await files.writeAll(walk(BUNDLED_MESSAGES).map((file): [string, string] => [`${dir}/${path.relative(BUNDLED_MESSAGES, file).split(path.sep).join("/")}`, readFileSync(file, "utf8")]));
 }
 
 /** Find a sequence by id, or by a unique suffix ("founder-direct" -> "email/personal/founder-direct"). */

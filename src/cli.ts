@@ -19,7 +19,7 @@ import { applySchema, type ApplyItem } from "./domains/twenty";
 import path from "node:path";
 import { emailProblem, OwnerAuth, passwordProblem } from "./domains/auth";
 import { ROOT } from "./domains/config";
-import { openDatabase } from "./domains/db";
+import { connectDatabase, databaseFromEnv, openDatabase } from "./domains/db";
 
 const HELP = `${bold("cold")}: cold calls, cold DMs and cold emails for personal and company accounts
 
@@ -440,8 +440,11 @@ async function owner(sub: string | undefined): Promise<number> {
     return 0;
   }
   if (sub) throw new UsageError(`Unknown: cold owner ${sub}. Use \`cold owner\` or \`cold owner hash\`.`);
-  const auth = new OwnerAuth(openDatabase(path.join(ROOT, ".cold", "cold.db")), { envOwner: OwnerAuth.envOwner() });
-  const current = auth.owner();
+  // With the database's address in the environment (vercel env pull), this resets the hosted login.
+  const remote = databaseFromEnv();
+  const db = remote ? await connectDatabase(remote) : await openDatabase(path.join(ROOT, ".cold", "cold.db"));
+  const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
+  const current = await auth.owner();
   if (current?.managedByEnv) throw new UsageError("The login is set by COLD_OWNER_EMAIL and COLD_OWNER_PASSWORD_HASH; change those instead.");
   let email = flags.email?.trim() ?? "";
   if (!email) {

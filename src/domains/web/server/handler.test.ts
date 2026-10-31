@@ -19,8 +19,8 @@ let setup: SetupCode;
 let announced: string[];
 const privateCalls: string[] = [];
 
-beforeEach(() => {
-  const db = openDatabase(":memory:");
+beforeEach(async () => {
+  const db = await openDatabase(":memory:");
   auth = new OwnerAuth(db);
   waitlist = new Waitlist(db);
   announced = [];
@@ -28,6 +28,7 @@ beforeEach(() => {
   handler = createHandler({
     settings: serverSettings({ COLD_UI_PORT: "4100" }),
     assets,
+    version: assets.version,
     auth,
     waitlist,
     setup,
@@ -67,7 +68,7 @@ describe("the public side", () => {
   test("the waitlist takes signups without a login", async () => {
     const response = await call("POST", "/api/waitlist", { email: "dana@example.com", elapsedMs: 5000 });
     expect(response.status).toBe(201);
-    expect(waitlist.counts().total).toBe(1);
+    expect((await waitlist.counts()).total).toBe(1);
     expect((await call("POST", "/api/waitlist", { email: "bad" })).status).toBe(400);
   });
 
@@ -81,7 +82,7 @@ describe("the public side", () => {
 
 describe("signing in", () => {
   test("first run: the setup code creates the owner and signs them in", async () => {
-    setup.issue();
+    await setup.issue();
     expect((await (await call("GET", "/api/session")).json()) as object).toMatchObject({ signedIn: false, setupRequired: true });
     expect((await call("POST", "/api/session/setup", { code: "WRON-GCOD-EXXX", email: "me@cold.dev", password: "correct horse battery" })).status).toBe(403);
     const created = await call("POST", "/api/session/setup", { code: announced[0], email: "me@cold.dev", password: "correct horse battery" });
@@ -101,7 +102,7 @@ describe("signing in", () => {
     const login = await call("POST", "/api/session/login", { email: "me@cold.dev", password: "correct horse battery" });
     const cookie = cookieOf(login);
     expect(login.status).toBe(200);
-    waitlist.join({ email: "dana@example.com", channels: [] });
+    await waitlist.join({ email: "dana@example.com", channels: [] });
     const list = (await (await call("GET", "/api/waitlist", undefined, { cookie })).json()) as { entries: unknown[] };
     expect(list.entries).toHaveLength(1);
     const csv = await call("GET", "/api/waitlist.csv", undefined, { cookie });
@@ -119,8 +120,8 @@ describe("signing in", () => {
   });
 
   test("twenty wrong setup codes replace the code", async () => {
-    setup.issue();
-    for (let i = 0; i < 20; i++) setup.check("nope");
+    await setup.issue();
+    for (let i = 0; i < 20; i++) await setup.check("nope");
     expect(announced).toHaveLength(2);
     expect(announced[0]).not.toBe(announced[1]);
   });

@@ -154,7 +154,7 @@ async function finished<T>(runId: string): Promise<AiRun<T>> {
   throw new Error("the run never finished");
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   delete process.env.COLD_CONFIG;
   root = mkdtempSync(path.join(tmpdir(), "cold-ai-"));
   cpSync(path.join(REPO, "messages"), path.join(root, "messages"), { recursive: true });
@@ -163,7 +163,7 @@ beforeAll(() => {
   writeFileSync(path.join(root, "cold.yaml"), example.replace("store: auto", "store: file").replaceAll(/(min|max)_delay_seconds: \d+/g, "$1_delay_seconds: 0"));
   process.env.SMTP_URL_PERSONAL = "smtp://unused";
   const transport: MailTransport = { verify: async () => true, sendMail: async (draft) => void sent.push(draft) };
-  const ctx = new WebContext({ root, messagesDir: path.join(root, "messages"), db: openDatabase(":memory:"), aiCall: () => fakeClaude, transport: () => transport, now: () => MONDAY });
+  const ctx = new WebContext({ root, db: await openDatabase(":memory:"), aiCall: () => fakeClaude, transport: () => transport, now: () => MONDAY });
   api = createApi(ctx, aiRoutes(ctx));
 });
 
@@ -251,7 +251,7 @@ describe("the AI routes", () => {
   });
 
   test("without an API key, the AI routes say how to add one", async () => {
-    const ctx = new WebContext({ root, messagesDir: path.join(root, "messages"), db: openDatabase(":memory:"), now: () => MONDAY });
+    const ctx = new WebContext({ root, db: await openDatabase(":memory:"), now: () => MONDAY });
     const bare = createApi(ctx, aiRoutes(ctx));
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;

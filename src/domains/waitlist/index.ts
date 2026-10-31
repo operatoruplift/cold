@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { metaValue, type Database } from "../db";
+import { metaValue, type Db } from "../db";
 
 export const WAITLIST_CHANNELS = ["email", "dm", "calls", "prospecting"] as const;
 export type WaitlistChannel = (typeof WAITLIST_CHANNELS)[number];
@@ -110,58 +110,61 @@ function cell(value: string | number | undefined): string {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** People who asked to hear when COLD opens up, in the app's SQLite file. */
+/** People who asked to hear when COLD opens up, in the app's database. */
 export class Waitlist {
-  private readonly salt: string;
+  private salt?: Promise<string>;
 
   constructor(
-    private readonly db: Database,
+    private readonly db: Db,
     private readonly now: () => Date = () => new Date(),
-  ) {
-    this.salt = metaValue(db, "waitlist_ip_salt", () => randomBytes(16).toString("hex"));
-  }
+  ) {}
 
   /** Enough to notice many signups from one address, without keeping the address. */
-  ipHash(ip: string | undefined): string | undefined {
-    return ip ? createHash("sha256").update(`${this.salt}:${ip}`).digest("hex").slice(0, 16) : undefined;
+  async ipHash(ip: string | undefined): Promise<string | undefined> {
+    if (!ip) return undefined;
+    this.salt ??= metaValue(this.db, "waitlist_ip_salt", () => randomBytes(16).toString("hex"));
+    return createHash("sha256").update(`${await this.salt}:${ip}`).digest("hex").slice(0, 16);
   }
 
   /** Add someone. Signing up twice keeps the first entry and fills in anything it lacked. */
-  join(signup: WaitlistSignup, meta: { ip?: string; userAgent?: string | null } = {}): { created: boolean } {
+  async join(signup: WaitlistSignup, meta: { ip?: string; userAgent?: string | null } = {}): Promise<{ created: boolean }> {
     const at = this.now().toISOString();
-    const existing = this.db.query<{ id: number }, [string]>("SELECT id FROM waitlist WHERE email = ?").get(signup.email);
+    const existing = await this.db.get<{ id: number }>("SELECT id FROM waitlist WHERE email = ?", signup.email);
     if (existing) {
-      this.db
-        .query(
-          `UPDATE waitlist SET name = COALESCE(name, ?), company = COALESCE(company, ?), role = COALESCE(role, ?),
-             channels = COALESCE(NULLIF(channels, ''), ?), note = COALESCE(note, ?), updated_at = ? WHERE id = ?`,
-        )
-        .run(signup.name ?? null, signup.company ?? null, signup.role ?? null, signup.channels.join(","), signup.note ?? null, at, existing.id);
+      await this.db.run(
+        `UPDATE waitlist SET name = COALESCE(name, ?), company = COALESCE(company, ?), role = COALESCE(role, ?),
+           channels = COALESCE(NULLIF(channels, ''), ?), note = COALESCE(note, ?), updated_at = ? WHERE id = ?`,
+        signup.name ?? null,
+        signup.company ?? null,
+        signup.role ?? null,
+        signup.channels.join(","),
+        signup.note ?? null,
+        at,
+        existing.id,
+      );
       return { created: false };
     }
-    this.db
-      .query(
-        `INSERT INTO waitlist (email, name, company, role, channels, note, source, referrer, ip_hash, user_agent, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        signup.email,
+    // Two signups for one address at the same moment: the second fills in the first.
+    const inserted = await this.db.run(
+      `INSERT INTO waitlist (email, name, company, role, channels, note, source, referrer, ip_hash, user_agent, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO NOTHING`,
+      signup.email,
         signup.name ?? null,
         signup.company ?? null,
         signup.role ?? null,
         signup.channels.join(","),
         signup.note ?? null,
         signup.source ?? null,
-        signup.referrer ?? null,
-        this.ipHash(meta.ip) ?? null,
-        meta.userAgent?.slice(0, 300) ?? null,
-        at,
-        at,
-      );
-    return { created: true };
+      signup.referrer ?? null,
+      (await this.ipHash(meta.ip)) ?? null,
+      meta.userAgent?.slice(0, 300) ?? null,
+      at,
+      at,
+    );
+    return { created: inserted.changes > 0 };
   }
 
-  list(filter: { q?: string; status?: string } = {}): WaitlistEntry[] {
+  async list(filter: { q?: string; status?: string } = {}): Promise<WaitlistEntry[]> {
     const where: string[] = [];
     const params: string[] = [];
     if (filter.status && (WAITLIST_STATUSES as readonly string[]).includes(filter.status)) {
@@ -174,41 +177,40 @@ export class Waitlist {
       params.push(like, like, like, like);
     }
     const sql = `SELECT * FROM waitlist ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC`;
-    return this.db.query<Row, string[]>(sql).all(...params).map(toEntry);
+    return (await this.db.all<Row>(sql, ...params)).map(toEntry);
   }
 
-  counts(): WaitlistCounts {
+  async counts(): Promise<WaitlistCounts> {
     const weekAgo = new Date(this.now().getTime() - 7 * 86_400_000).toISOString();
-    const row = this.db
-      .query<WaitlistCounts, [string]>(
-        `SELECT COUNT(*) AS total,
-           COALESCE(SUM(status = 'waiting'), 0) AS waiting,
-           COALESCE(SUM(status = 'invited'), 0) AS invited,
-           COALESCE(SUM(status = 'archived'), 0) AS archived,
-           COALESCE(SUM(created_at >= ?), 0) AS lastWeek
-         FROM waitlist`,
-      )
-      .get(weekAgo)!;
-    return row;
+    const row = await this.db.get<WaitlistCounts>(
+      `SELECT COUNT(*) AS total,
+         COALESCE(SUM(status = 'waiting'), 0) AS waiting,
+         COALESCE(SUM(status = 'invited'), 0) AS invited,
+         COALESCE(SUM(status = 'archived'), 0) AS archived,
+         COALESCE(SUM(created_at >= ?), 0) AS lastWeek
+       FROM waitlist`,
+      weekAgo,
+    );
+    return row!;
   }
 
-  update(id: number, patch: { status?: string; ownerNote?: string }): WaitlistEntry {
-    const current = this.db.query<Row, [number]>("SELECT * FROM waitlist WHERE id = ?").get(id);
+  async update(id: number, patch: { status?: string; ownerNote?: string }): Promise<WaitlistEntry> {
+    const current = await this.db.get<Row>("SELECT * FROM waitlist WHERE id = ?", id);
     if (!current) throw new Error("No such person on the waitlist.");
     const status = patch.status ?? current.status;
     if (!(WAITLIST_STATUSES as readonly string[]).includes(status)) throw new Error(`Status must be one of ${WAITLIST_STATUSES.join(", ")}.`);
     const ownerNote = patch.ownerNote === undefined ? current.owner_note : patch.ownerNote.trim().slice(0, 1000) || null;
-    this.db.query("UPDATE waitlist SET status = ?, owner_note = ?, updated_at = ? WHERE id = ?").run(status, ownerNote, this.now().toISOString(), id);
-    return toEntry(this.db.query<Row, [number]>("SELECT * FROM waitlist WHERE id = ?").get(id)!);
+    await this.db.run("UPDATE waitlist SET status = ?, owner_note = ?, updated_at = ? WHERE id = ?", status, ownerNote, this.now().toISOString(), id);
+    return toEntry((await this.db.get<Row>("SELECT * FROM waitlist WHERE id = ?", id))!);
   }
 
-  remove(id: number): boolean {
-    return this.db.query("DELETE FROM waitlist WHERE id = ?").run(id).changes > 0;
+  async remove(id: number): Promise<boolean> {
+    return (await this.db.run("DELETE FROM waitlist WHERE id = ?", id)).changes > 0;
   }
 
-  csv(): string {
+  async csv(): Promise<string> {
     const header = ["email", "name", "company", "role", "channels", "note", "status", "owner_note", "source", "referrer", "joined"];
-    const rows = this.list().map((e) =>
+    const rows = (await this.list()).map((e) =>
       [e.email, e.name, e.company, e.role, e.channels.join(" "), e.note, e.status, e.ownerNote, e.source, e.referrer, e.createdAt].map(cell).join(","),
     );
     return [header.join(","), ...rows].join("\n") + "\n";

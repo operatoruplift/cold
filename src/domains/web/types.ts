@@ -45,9 +45,11 @@ export interface AccountStatus {
 
 export interface StatusResponse {
   configFile: string;
+  /** Where your files are: a folder on this computer, or the database (on a server without a disk). */
+  storage: "disk" | "database";
   isExample: boolean;
   configError?: string;
-  store: { kind: "twenty" | "file"; where: string } | { error: string };
+  store: { kind: "twenty" | "file" | "database"; where: string } | { error: string };
   twenty: { configured: boolean; baseUrl?: string };
   reacher: boolean;
   accounts: AccountStatus[];
@@ -179,6 +181,9 @@ export interface SettingsResponse {
   yaml: string;
   errors: string[];
   env: Array<{ name: string; set: boolean; hint: string }>;
+  /** Where saved keys go: ".env.local", or "the database (encrypted)". Absent when they cannot be saved here. */
+  secretsWhere?: string;
+  storage: "disk" | "database";
 }
 
 export interface ActionResponse {

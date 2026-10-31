@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { Database } from "../db";
+import type { Db } from "../db";
 
 /** The cookie that carries a signed-in session. */
 export const SESSION_COOKIE = "cold_session";
@@ -69,15 +69,17 @@ export const sameSetupCode = (given: string, expected: string) => given.trim().t
 
 /**
  * The one person who may use the app: an email, an argon2id password hash and
- * their sessions, all in the app's SQLite file. COLD_OWNER_EMAIL with
+ * their sessions, all in the app's database. COLD_OWNER_EMAIL with
  * COLD_OWNER_PASSWORD_HASH sets the owner from the environment instead, for
  * hosts where you cannot run a command.
  */
 export class OwnerAuth {
   private dummyHash?: Promise<string>;
+  /** The owner changes only through setOwner, so a server can remember it for a while. */
+  private cached?: { at: number; owner?: { email: string } };
 
   constructor(
-    private readonly db: Database,
+    private readonly db: Db,
     private readonly options: { envOwner?: { email: string; passwordHash: string }; now?: () => Date } = {},
   ) {}
 
@@ -95,15 +97,19 @@ export class OwnerAuth {
     return this.options.now?.() ?? new Date();
   }
 
-  owner(): Owner | undefined {
+  async owner(): Promise<Owner | undefined> {
     if (this.options.envOwner) return { email: this.options.envOwner.email, managedByEnv: true };
-    const row = this.db.query<{ email: string }, []>("SELECT email FROM owner WHERE id = 1").get();
-    return row ? { email: row.email, managedByEnv: false } : undefined;
+    const now = Date.now();
+    // Another server may have just created the login, so "none yet" is never remembered.
+    if (!this.cached?.owner || now - this.cached.at > 30_000) {
+      this.cached = { at: now, owner: await this.db.get<{ email: string }>("SELECT email FROM owner WHERE id = 1") };
+    }
+    return this.cached.owner ? { email: this.cached.owner.email, managedByEnv: false } : undefined;
   }
 
-  private passwordHash(): string | undefined {
+  private async passwordHash(): Promise<string | undefined> {
     if (this.options.envOwner) return this.options.envOwner.passwordHash;
-    return this.db.query<{ password_hash: string }, []>("SELECT password_hash FROM owner WHERE id = 1").get()?.password_hash;
+    return (await this.db.get<{ password_hash: string }>("SELECT password_hash FROM owner WHERE id = 1"))?.password_hash;
   }
 
   /** Create or replace the owner. Signs every session out. */
@@ -114,16 +120,17 @@ export class OwnerAuth {
     if (problem) throw new Error(problem);
     const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
     const at = this.now().toISOString();
-    this.db.transaction(() => {
-      this.db.query("INSERT INTO owner (id, email, password_hash, created_at, updated_at) VALUES (1, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET email = excluded.email, password_hash = excluded.password_hash, updated_at = excluded.updated_at").run(address, hash, at, at);
-      this.db.query("DELETE FROM sessions").run();
-    })();
+    await this.db.batch([
+      ["INSERT INTO owner (id, email, password_hash, created_at, updated_at) VALUES (1, ?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET email = excluded.email, password_hash = excluded.password_hash, updated_at = excluded.updated_at", address, hash, at, at],
+      ["DELETE FROM sessions"],
+    ]);
+    this.cached = { at: Date.now(), owner: { email: address } };
   }
 
   /** True when the email and password are the owner's. Takes as long either way. */
   async verify(email: string, password: string): Promise<boolean> {
-    const owner = this.owner();
-    const hash = this.passwordHash();
+    const owner = await this.owner();
+    const hash = await this.passwordHash();
     const matches = !!owner && normalizeEmail(email) === owner.email && !!hash;
     if (!matches || !hash) {
       this.dummyHash ??= Bun.password.hash("not the password, only for timing", { algorithm: "argon2id" });
@@ -133,50 +140,55 @@ export class OwnerAuth {
     return Bun.password.verify(password, hash).catch(() => false);
   }
 
-  createSession(meta: { userAgent?: string | null; ip?: string | null } = {}): { token: string; expiresAt: Date } {
+  async createSession(meta: { userAgent?: string | null; ip?: string | null } = {}): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(32).toString("base64url");
     const now = this.now();
     const expiresAt = new Date(now.getTime() + SESSION_DAYS * 86_400_000);
-    this.db.query("DELETE FROM sessions WHERE expires_at <= ?").run(now.toISOString());
-    this.db
-      .query("INSERT INTO sessions (token_hash, created_at, last_seen_at, expires_at, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(hashToken(token), now.toISOString(), now.toISOString(), expiresAt.toISOString(), meta.userAgent?.slice(0, 300) ?? null, meta.ip ?? null);
+    await this.db.batch([
+      ["DELETE FROM sessions WHERE expires_at <= ?", now.toISOString()],
+      [
+        "INSERT INTO sessions (token_hash, created_at, last_seen_at, expires_at, user_agent, ip) VALUES (?, ?, ?, ?, ?, ?)",
+        hashToken(token),
+        now.toISOString(),
+        now.toISOString(),
+        expiresAt.toISOString(),
+        meta.userAgent?.slice(0, 300) ?? null,
+        meta.ip ?? null,
+      ],
+    ]);
     return { token, expiresAt };
   }
 
   /** The session behind a token, if it is real and current. Keeps an active session alive. */
-  check(token: string | undefined): CheckedSession | undefined {
-    if (!token || token.length > 100 || !this.owner()) return undefined;
+  async check(token: string | undefined): Promise<CheckedSession | undefined> {
+    if (!token || token.length > 100 || !(await this.owner())) return undefined;
     const tokenHash = hashToken(token);
-    const row = this.db.query<SessionRow, [string]>("SELECT * FROM sessions WHERE token_hash = ?").get(tokenHash);
+    const row = await this.db.get<SessionRow>("SELECT * FROM sessions WHERE token_hash = ?", tokenHash);
     if (!row) return undefined;
     const now = this.now();
     if (new Date(row.expires_at) <= now) {
-      this.db.query("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash);
+      await this.db.run("DELETE FROM sessions WHERE token_hash = ?", tokenHash);
       return undefined;
     }
     if (now.getTime() - new Date(row.last_seen_at).getTime() < REFRESH_EVERY_MS) return { id: tokenHash.slice(0, 12), expiresAt: new Date(row.expires_at), refreshed: false };
     const expiresAt = new Date(now.getTime() + SESSION_DAYS * 86_400_000);
-    this.db.query("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token_hash = ?").run(now.toISOString(), expiresAt.toISOString(), tokenHash);
+    await this.db.run("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE token_hash = ?", now.toISOString(), expiresAt.toISOString(), tokenHash);
     return { id: tokenHash.slice(0, 12), expiresAt, refreshed: true };
   }
 
-  revoke(token: string | undefined): void {
-    if (token) this.db.query("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
+  async revoke(token: string | undefined): Promise<void> {
+    if (token) await this.db.run("DELETE FROM sessions WHERE token_hash = ?", hashToken(token));
   }
 
   /** Sign out everywhere, except the session given (the one asking). Returns how many ended. */
-  revokeOthers(keepToken?: string): number {
+  async revokeOthers(keepToken?: string): Promise<number> {
     const keep = keepToken ? hashToken(keepToken) : "";
-    return this.db.query("DELETE FROM sessions WHERE token_hash != ?").run(keep).changes;
+    return (await this.db.run("DELETE FROM sessions WHERE token_hash != ?", keep)).changes;
   }
 
-  sessions(currentToken?: string): SessionInfo[] {
+  async sessions(currentToken?: string): Promise<SessionInfo[]> {
     const current = currentToken ? hashToken(currentToken) : "";
-    return this.db
-      .query<SessionRow, [string]>("SELECT * FROM sessions WHERE expires_at > ? ORDER BY last_seen_at DESC")
-      .all(this.now().toISOString())
-      .map((row) => ({
+    return (await this.db.all<SessionRow>("SELECT * FROM sessions WHERE expires_at > ? ORDER BY last_seen_at DESC", this.now().toISOString())).map((row) => ({
         id: row.token_hash.slice(0, 12),
         createdAt: row.created_at,
         lastSeenAt: row.last_seen_at,
@@ -188,8 +200,17 @@ export class OwnerAuth {
   }
 }
 
+export type RateResult = { ok: true } | { ok: false; retryAfterSeconds: number };
+
+/** At most `limit` hits per key in a fixed window. */
+export interface Limiter {
+  /** Count one hit. When over the limit, says how long until the window resets. */
+  take(key: string): Promise<RateResult>;
+  reset(key: string): Promise<void>;
+}
+
 /** A fixed-window counter per key: at most `limit` hits in `windowMs`. In memory, so per process. */
-export class RateLimiter {
+export class RateLimiter implements Limiter {
   private readonly hits = new Map<string, { start: number; count: number }>();
 
   constructor(
@@ -198,8 +219,7 @@ export class RateLimiter {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Count one hit. When over the limit, says how long until the window resets. */
-  take(key: string): { ok: true } | { ok: false; retryAfterSeconds: number } {
+  async take(key: string): Promise<RateResult> {
     const now = this.now();
     if (this.hits.size > 10_000) for (const [k, v] of this.hits) if (now - v.start >= this.windowMs) this.hits.delete(k);
     const entry = this.hits.get(key);
@@ -212,8 +232,42 @@ export class RateLimiter {
     return { ok: false, retryAfterSeconds: Math.ceil((entry.start + this.windowMs - now) / 1000) };
   }
 
-  reset(key: string): void {
+  async reset(key: string): Promise<void> {
     this.hits.delete(key);
+  }
+}
+
+/**
+ * The same counter in the database, so every copy of the server counts
+ * together (Vercel runs as many as the traffic needs).
+ */
+export class DbRateLimiter implements Limiter {
+  constructor(
+    private readonly db: Db,
+    private readonly limit: number,
+    private readonly windowMs: number,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  async take(key: string): Promise<RateResult> {
+    const now = this.now();
+    const row = await this.db.get<{ window_start: number; count: number }>(
+      `INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1)
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE WHEN rate_limits.window_start <= ? THEN 1 ELSE rate_limits.count + 1 END,
+         window_start = CASE WHEN rate_limits.window_start <= ? THEN excluded.window_start ELSE rate_limits.window_start END
+       RETURNING window_start, count`,
+      key,
+      now,
+      now - this.windowMs,
+      now - this.windowMs,
+    );
+    if (!row || row.count <= this.limit) return { ok: true };
+    return { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((row.window_start + this.windowMs - now) / 1000)) };
+  }
+
+  async reset(key: string): Promise<void> {
+    await this.db.run("DELETE FROM rate_limits WHERE key = ?", key);
   }
 }
 
