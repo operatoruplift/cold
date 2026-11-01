@@ -11,6 +11,8 @@ import { DbFiles, DiskFiles, EnvFileSecrets, secretKey, type Files, type Secrets
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
 import { xAppFromEnv, XClient, XStore, type XFetch } from "../../xApi";
 import { LISTEN_PREFIX, ListenStore, listenProspect } from "../../listen";
+import { LeadWatch } from "../../leads";
+import type { TwentyClient } from "../../twenty";
 import { CampaignStore } from "../campaigns";
 import { processScoreItem } from "../decide/engine";
 import { ScoreJobs } from "../decide/jobs";
@@ -34,6 +36,12 @@ export interface WebContextOptions {
   transport?: (account: Account) => MailTransport;
   /** How cold reaches X's API (tests hand it a fake X). */
   xFetch?: XFetch;
+  /** Twenty, when not from TWENTY_BASE_URL and TWENTY_API_KEY (tests hand it a fake). */
+  twenty?: () => TwentyClient | undefined;
+  /** How lead alerts reach ntfy (tests hand it a fake). */
+  ntfyFetch?: typeof fetch;
+  /** The app's address, for links in lead alerts: "https://cold.example.com/app/". */
+  appUrl?: string;
   now?: () => Date;
   random?: () => number;
 }
@@ -82,6 +90,8 @@ export class WebContext {
   readonly x?: XStore;
   /** Listening matches OpenMagpie delivered; only with the database. */
   readonly listening?: ListenStore;
+  /** Pushes an alert when one of offer's quiz leads comes in; only with the database. */
+  readonly leads?: LeadWatch;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -108,7 +118,13 @@ export class WebContext {
       });
       this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
       this.listening = new ListenStore(options.db);
+      this.leads = new LeadWatch({ db: options.db, client: () => this.twenty(), appUrl: options.appUrl, fetch: options.ntfyFetch, now: () => this.now() });
     }
+  }
+
+  /** Twenty, once TWENTY_BASE_URL and TWENTY_API_KEY are set. */
+  twenty(): TwentyClient | undefined {
+    return this.options.twenty ? this.options.twenty() : twentyClient();
   }
 
   /** X's API through the owner's developer app, once X_CLIENT_ID is set. */
@@ -284,7 +300,7 @@ export class WebContext {
       const watch = source.slice(LISTEN_PREFIX.length);
       prospects = (await this.listening.items({ watch: watch === "all" ? undefined : watch, limit: 2000 })).map(listenProspect);
     } else {
-      prospects = await loadProspects(source, { where: where || undefined, client: twentyClient() });
+      prospects = await loadProspects(source, { where: where || undefined, client: this.twenty() });
     }
     this.prospectCache.set(key, { at: Date.now(), prospects });
     return prospects;

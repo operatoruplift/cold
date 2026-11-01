@@ -8,6 +8,7 @@ import type { CallSheet } from "../call";
 import type { DecideSettings } from "../config";
 import type { Action, Decision, Dossier, PickedBy, StyleInsights, Tier } from "../decide";
 import type { EmailEvent, EmailRunResult } from "../email";
+import type { QuizLead } from "../leads";
 import type { LintIssue, Platform, Voice } from "../messages";
 import type { ApplyReport } from "../twenty";
 import type { Touch } from "../touches";
@@ -109,6 +110,35 @@ export interface ListenStatusResponse {
   /** Point OpenMagpie's webhook action here, with Authorization: Bearer <COLD_LISTEN_SECRET>. */
   webhookUrl: string;
   watches: Array<{ id: string; name: string; count: number; latest: string }>;
+}
+
+/** Lead alerts: whether they are set up, and when they last looked. */
+export interface LeadAlertState {
+  /** COLD_NTFY_URL is set and usable. */
+  configured: boolean;
+  /** What is wrong with COLD_NTFY_URL, in words. */
+  problem?: string;
+  /** The app's database is there to remember which leads were pushed. */
+  available: boolean;
+  /** When the last look for new leads ran. */
+  lookedAt?: string;
+  /** The newest lead it has seen. */
+  seenUntil?: string;
+}
+
+/** Settings, Lead alerts. */
+export interface LeadAlertsResponse {
+  /** Twenty is connected, so offer's agencyLeads can be read. */
+  twenty: boolean;
+  alerts: LeadAlertState;
+}
+
+/** The Calls page's quiz leads from offer. */
+export interface LeadsResponse extends LeadAlertsResponse {
+  /** The last two weeks' leads, best to call first. */
+  leads: QuizLead[];
+  /** Why the leads couldn't be read. */
+  error?: string;
 }
 
 export interface ProspectSummary {

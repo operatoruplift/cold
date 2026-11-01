@@ -65,6 +65,12 @@ call scripts and the Do Not Contact list.
   someone asks for what you sell comes in as a prospect whose trigger line is
   the post itself, with its link. A post on X can be answered with an X DM;
   save a watch as a list to fill in the rest (company, email) and research it.
+- **Quiz leads get called first.** Leads from your
+  [offer](https://github.com/matthewdonsemail-lab/offer) quiz funnel are a
+  prospect source (`twenty:agencyLeads`) with their answers as variables,
+  listed at the top of Calls, newest first, until someone calls them. Set
+  `COLD_NTFY_URL` and a push reaches your phone ([ntfy](https://ntfy.sh)) a
+  minute after each qualified lead comes in, with their number.
 - **The messages are the product.** 45 messages across cold email, LinkedIn,
   X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message

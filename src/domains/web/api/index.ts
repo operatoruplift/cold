@@ -114,6 +114,8 @@ function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
   fields.set("X_CLIENT_ID", "Optional: your X developer app's OAuth 2.0 Client ID, so X DMs go out from cold through X's API (developer.x.com). Then Connect X below");
   fields.set("X_CLIENT_SECRET", "Optional: that app's OAuth 2.0 Client Secret (a Web App; leave it empty for a Native App)");
   fields.set("COLD_LISTEN_SECRET", "Optional: a long random string. OpenMagpie's webhook action sends it as Authorization: Bearer <it>, so its matches come in as prospects");
+  fields.set("COLD_NTFY_URL", "Optional: an ntfy topic's address, e.g. https://ntfy.sh/cold-leads-7f3k2q, for a push to your phone when a quiz lead comes in. The push carries the lead's name and number: pick a long random topic, or your own ntfy server with a token");
+  fields.set("COLD_NTFY_TOKEN", "Optional: an ntfy access token (tk_...), for a topic that needs one");
   return [...fields.entries()].map(([name, hint]) => ({ name, set: !!process.env[name]?.trim(), hint }));
 }
 
@@ -401,6 +403,7 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
           sources.push({ id: "twenty:people", label: "Twenty: People", kind: "twenty" });
           sources.push({ id: "twenty:agencyProspects", label: "Twenty: dialer prospects (businesses)", kind: "twenty" });
           sources.push({ id: "twenty:agencyPeople", label: "Twenty: people at dialer prospects", kind: "twenty" });
+          sources.push({ id: "twenty:agencyLeads", label: "Twenty: quiz leads from offer", kind: "twenty" });
         }
         const watches = (await ctx.listening?.watches()) ?? [];
         if (watches.length > 1) sources.push({ id: "listen:all", label: `Listening: every watch (${watches.reduce((n, w) => n + w.count, 0)} matches)`, kind: "listen" });

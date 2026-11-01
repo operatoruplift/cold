@@ -1,6 +1,6 @@
-import { AtSign, CheckCircle2, Copy, Database, Ear, FileText, KeyRound, ListPlus, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, Unplug, UserRound, Wand2, XCircle } from "lucide-react";
+import { AtSign, BellRing, CheckCircle2, Copy, Database, Ear, FileText, KeyRound, ListPlus, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, Send, ShieldCheck, Sparkles, Unplug, UserRound, Wand2, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ActionResponse, AiStatusResponse, ListenStatusResponse, SessionsResponse, SettingsResponse, XStatusResponse } from "../../domains/web/types";
+import type { ActionResponse, AiStatusResponse, LeadAlertsResponse, ListenStatusResponse, SessionsResponse, SettingsResponse, XStatusResponse } from "../../domains/web/types";
 import { usePwa, install } from "../app/pwa";
 import { useSession } from "../app/session";
 import { useStatus } from "../app/status";
@@ -134,6 +134,7 @@ export function SettingsPage() {
 
       <XCard />
       <ListenCard />
+      <LeadAlertsCard />
 
       {settings.loading && !settings.data ? <Loading /> : settings.error ? <ErrorNotice error={settings.error} /> : settings.data && <Secrets settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
       {settings.data && <ConfigEditor settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
@@ -209,6 +210,53 @@ function ListenCard() {
                 </div>
               ))
             )}
+          </div>
+        )
+      )}
+    </Card>
+  );
+}
+
+/** A push to your phone when one of offer's quiz leads comes in, through ntfy. */
+function LeadAlertsCard() {
+  const leads = useApi<LeadAlertsResponse>("/api/leads/alerts");
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function test() {
+    setBusy(true);
+    try {
+      toast.success((await api<ActionResponse>("/api/leads/test", { method: "POST" })).message);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const d = leads.data;
+  return (
+    <Card title="Lead alerts" icon={BellRing}>
+      {leads.loading && !d ? (
+        <Loading />
+      ) : leads.error ? (
+        <ErrorNotice error={leads.error} />
+      ) : (
+        d && (
+          <div className="stack">
+            <p className="hint">
+              When someone takes your quiz in offer and qualifies, COLD pushes their name, company and number to your phone, so you call while it's fresh. It uses ntfy: install the ntfy app, subscribe to a topic with a long random name, and put its address in COLD_NTFY_URL below. The push carries the lead's name and number, so keep the topic to yourself, or use your own ntfy server with a token.
+            </p>
+            <Check ok={d.twenty}>{d.twenty ? "Twenty is connected, where offer saves its leads" : "Connect Twenty: offer saves its leads there"}</Check>
+            <Check ok={d.alerts.configured}>{d.alerts.configured ? "COLD_NTFY_URL is set" : "Set COLD_NTFY_URL below"}</Check>
+            {d.alerts.problem && <Notice tone="amber">{d.alerts.problem}</Notice>}
+            {!d.alerts.available && <Notice tone="amber">This server has no database to remember which leads were pushed.</Notice>}
+            {d.alerts.lookedAt && <span className="hint">Last looked for new leads {ago(d.alerts.lookedAt)}. Leads from before alerts were set up are never pushed.</span>}
+            <div className="row">
+              <Button size="sm" icon={Send} loading={busy} disabled={!d.alerts.configured} onClick={test}>
+                Send a test alert
+              </Button>
+            </div>
           </div>
         )
       )}

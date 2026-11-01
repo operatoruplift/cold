@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Quiz leads get called first.** offer's quiz leads (`agencyLeads` in
+  Twenty) are a prospect source, `twenty:agencyLeads`: the person who took
+  the quiz (never the business's decision maker, when they came through a
+  business's own link), their answers and UTM tags as variables, and "Saw
+  you took our quiz on Nov 2." as the trigger when the business has none.
+  Calls lists the last two weeks' qualified leads nobody has called yet at
+  the top, newest first; picking one fills the script in for them, with a
+  Call button and their answers. With `COLD_NTFY_URL`, a push reaches your
+  phone through ntfy within a minute of each qualified lead (several at once
+  come as one), tapping it opens the lead; it looks once a minute across
+  every server on the database, never pushes a lead twice, retries one that
+  failed, and never pushes leads from before it was set up. Settings, Lead
+  alerts sends a test.
+- **Picking a dialer prospect fills the script in again.** Prospects from
+  `twenty:agencyProspects` and `twenty:agencyPeople` were never found by
+  their key in a call sheet or a research run, so the script kept its
+  braces.
 - **Leads from listening.** OpenMagpie's webhook action delivers the posts
   its watches match to `/api/listen/magpie` (with `Authorization: Bearer`
   and `COLD_LISTEN_SECRET`). Each match is kept once, however often it is

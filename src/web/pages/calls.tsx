@@ -1,13 +1,14 @@
-import { ListChecks, Phone, RefreshCw, Search, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ListChecks, Phone, PhoneCall, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { CallPrep } from "../../domains/ai/tasks";
 import type { CallSheet } from "../../domains/call";
-import type { ActionResponse, LibraryResponse } from "../../domains/web/types";
+import type { QuizLead } from "../../domains/leads";
+import type { ActionResponse, LeadsResponse, LibraryResponse } from "../../domains/web/types";
 import { setQuery, useLocation } from "../app/router";
 import { useStatus } from "../app/status";
 import { runAndWait } from "../lib/ai";
 import { api, ApiError, useApi } from "../lib/api";
-import { voiceLabel } from "../lib/format";
+import { ago, voiceLabel } from "../lib/format";
 import { Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Pill, Tabs } from "../ui/kit";
 import { ProspectPicker } from "../ui/prospectPicker";
 
@@ -19,6 +20,16 @@ export function CallsPage() {
   const [source, setSource] = useState("");
   const [prospect, setProspect] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const leads = useApi<LeadsResponse>("/api/leads");
+  const leadId = query.get("lead") ?? "";
+  const lead = leads.data?.leads.find((l) => l.id === leadId);
+  const due = (leads.data?.leads ?? []).filter((l) => l.qualified && !l.calledAt && !l.doNotContact);
+  // A lead opened from its alert, or picked below, fills the script in for them.
+  useEffect(() => {
+    if (!lead) return;
+    setSource(LEADS_SOURCE);
+    setProspect(lead.prospectKey);
+  }, [lead?.id]);
   const scripts = library.data?.callScripts ?? [];
   const shown = [...scripts.filter((s) => s.voice === "personal"), ...scripts.filter((s) => s.voice === "company")];
   const selected = query.get("id") ?? shown[0]?.id ?? "";
@@ -36,6 +47,21 @@ export function CallsPage() {
             <input className="input" style={{ paddingLeft: 30 }} placeholder="Search scripts" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
         </div>
+        {due.length > 0 && (
+          <div className="list-group">
+            <div className="list-group-title">Quiz leads: call these first</div>
+            {due.slice(0, 8).map((l) => (
+              <button key={l.id} type="button" className={l.id === leadId ? "list-item active" : "list-item"} onClick={() => setQuery({ lead: l.id })}>
+                <div className="t">{l.label}</div>
+                <div className="s">
+                  {l.phone ?? "No phone"}
+                  {l.createdAt ? `, took the quiz ${ago(l.createdAt)}` : ""}
+                </div>
+              </button>
+            ))}
+            {due.length > 8 && <div className="hint" style={{ padding: "4px 16px 8px" }}>{due.length - 8} more waiting</div>}
+          </div>
+        )}
         {(["personal", "company"] as const).map((voice) => {
           const list = filtered.filter((s) => s.voice === voice);
           if (!list.length) return null;
@@ -75,6 +101,7 @@ export function CallsPage() {
                 </Button>
               }
             />
+            {lead && <LeadCard lead={lead} onClose={() => setQuery({ lead: undefined })} />}
             <div className="inline-fields" style={{ marginBottom: 16, maxWidth: 640 }}>
               <ProspectPicker
                 source={source}
@@ -82,6 +109,7 @@ export function CallsPage() {
                 onChange={(s, p) => {
                   setSource(s);
                   setProspect(p);
+                  if (lead && (s !== LEADS_SOURCE || p !== lead.prospectKey)) setQuery({ lead: undefined });
                 }}
               />
             </div>
@@ -124,6 +152,51 @@ export function CallsPage() {
         )}
       </div>
       {syncing && <SyncModal onClose={() => setSyncing(false)} />}
+    </div>
+  );
+}
+
+const LEADS_SOURCE = "twenty:agencyLeads";
+
+/** The quiz lead being called: how to reach them and what they answered. */
+function LeadCard({ lead, onClose }: { lead: QuizLead; onClose: () => void }) {
+  return (
+    <div className="card" style={{ marginBottom: 16, maxWidth: 640 }}>
+      <div className="card-body stack" style={{ gap: 8 }}>
+        <div className="row between wrap">
+          <span className="row wrap" style={{ gap: 6 }}>
+            <b>{lead.label}</b>
+            <Pill tone={lead.qualified ? "green" : "gray"}>{lead.qualified ? "Qualified" : "Disqualified"}</Pill>
+            {lead.doNotContact && <Pill tone="red">Do Not Contact</Pill>}
+            {lead.calledAt && <Pill tone="purple">Called {ago(lead.calledAt)}</Pill>}
+          </span>
+          <Button size="sm" icon={X} onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        <span className="text-2">
+          {lead.createdAt ? `Took your quiz ${ago(lead.createdAt)}` : "Took your quiz"}
+          {lead.from ? `, from ${lead.from}` : ""}
+          {lead.email ? `. ${lead.email}` : ""}
+        </span>
+        {lead.phone && !lead.doNotContact && (
+          <div className="row">
+            <a className="btn primary sm" href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`}>
+              <PhoneCall size={14} /> Call {lead.phone}
+            </a>
+          </div>
+        )}
+        {lead.answers.length > 0 && (
+          <div>
+            <div className="section-label">Their answers</div>
+            <ul className="message-box" style={{ paddingLeft: 34, whiteSpace: "normal" }}>
+              {lead.answers.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

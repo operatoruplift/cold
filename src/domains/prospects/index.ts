@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { TwentyClient, TwentyRecord } from "../twenty";
-import { fromAgencyPerson, fromAgencyProspect, fromCsvRow, fromPerson, parseCsv } from "./helpers";
+import { fromAgencyLead, fromAgencyPerson, fromAgencyProspect, fromCsvRow, fromPerson, parseCsv } from "./helpers";
 import type { Prospect } from "./types";
 
 export * from "./types";
@@ -45,6 +45,8 @@ export async function loadProspects(source: string, options: LoadOptions = {}): 
     }
     case "agencyProspects":
       return (await list("agencyProspects")).map(fromAgencyProspect);
+    case "agencyLeads":
+      return (await loadAgencyLeads(client, { where: options.where, limit: options.limit })).map((l) => l.prospect);
     case "agencyPeople": {
       const people = await list("agencyPeople");
       const prospects = byId(await client.getMany("agencyProspects", people.map((p) => p.prospectId as string)));
@@ -55,6 +57,14 @@ export async function loadProspects(source: string, options: LoadOptions = {}): 
   }
 }
 
+/** offer's quiz leads (agencyLeads), each with its record and as a prospect, the business it came through filled in. */
+export async function loadAgencyLeads(client: TwentyClient, options: { where?: string; limit?: number } = {}): Promise<Array<{ record: TwentyRecord; prospect: Prospect }>> {
+  const leads = await client.list("agencyLeads", { filter: options.where, limit: options.limit });
+  const linked = leads.map((l) => l.agencyProspectId as string).filter(Boolean);
+  const businesses = new Map((linked.length ? await client.getMany("agencyProspects", linked) : []).map((r) => [r.id, r]));
+  return leads.map((record) => ({ record, prospect: fromAgencyLead(record, businesses.get(record.agencyProspectId as string)) }));
+}
+
 /** The prospects in CSV text: a header row, then one prospect per row. */
 export function prospectsFromCsv(text: string, limit?: number): Prospect[] {
   const [headers, ...rows] = parseCsv(text);
@@ -62,11 +72,18 @@ export function prospectsFromCsv(text: string, limit?: number): Prospect[] {
   return rows.slice(0, limit ?? rows.length).map((row, i) => fromCsvRow(headers, row, i));
 }
 
-/** Pick one prospect by key, any identity, email, or a case-insensitive name/company match. */
+/**
+ * Pick one prospect: by its exact key, then by any identity, email or id in
+ * any case ("agencyProspect:<id>" and "agencyprospect:<id>" alike), then by a
+ * case-insensitive name/company match.
+ */
 export function findProspect(prospects: Prospect[], query: string): Prospect | undefined {
-  const q = query.trim().toLowerCase();
+  const raw = query.trim();
+  const q = raw.toLowerCase();
+  const same = (id: string | undefined) => !!id && id.toLowerCase() === q;
   return (
-    prospects.find((p) => p.key === q || p.identities.includes(q) || p.email === q || p.variables.id?.toLowerCase() === q) ??
+    prospects.find((p) => p.key === raw) ??
+    prospects.find((p) => same(p.key) || p.identities.some(same) || p.email === q || same(p.variables.id)) ??
     prospects.find((p) => p.label.toLowerCase().includes(q))
   );
 }

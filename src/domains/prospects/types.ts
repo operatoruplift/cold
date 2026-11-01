@@ -7,6 +7,8 @@ export interface ProspectLinks {
   companyId?: string;
   agencyProspectId?: string;
   agencyPersonId?: string;
+  /** offer's quiz lead, when the prospect is one. */
+  agencyLeadId?: string;
 }
 
 export interface Prospect {

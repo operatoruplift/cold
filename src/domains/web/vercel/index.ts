@@ -11,6 +11,7 @@ import { invocationDeadline } from "../background";
 import { WebContext } from "../context";
 import { clientAddress, createHandler, DbSetupCode } from "../server/handler";
 import { serverSettings } from "../server/settings";
+import { leadRoutes, logLeadCheck } from "../leads";
 import { listenRoutes } from "../listen";
 import { publicRoutes } from "../open";
 import { xRoutes } from "../x";
@@ -35,8 +36,8 @@ async function tidy(db: Db): Promise<void> {
 export async function createVercelApp(db: Db, options: { now?: () => Date } = {}): Promise<(request: Request) => Promise<Response>> {
   const files = new DbFiles(db);
   await seedMessagesInto(files);
-  const ctx = new WebContext({ files, secrets: new DbSecrets(db, secretKey()), db, now: options.now });
   const settings = serverSettings();
+  const ctx = new WebContext({ files, secrets: new DbSecrets(db, secretKey()), db, now: options.now, appUrl: new URL("/app/", settings.publicUrl).href });
   const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
   const appUrl = new URL("/app/", settings.publicUrl).href;
   const setup = new DbSetupCode(db, (code) => console.log(`First run: create your login at ${appUrl}?setup=${code} (setup code ${code}; it only works until the login exists)`));
@@ -46,7 +47,7 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     version: (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "dev").slice(0, 12),
     auth,
     waitlist: new Waitlist(db),
-    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx)]),
+    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx), ...leadRoutes(ctx)]),
     setup,
     // Vercel sets X-Forwarded-For to the visitor's address itself.
     clientIp: clientAddress(settings.proxyHops, () => undefined),
@@ -54,9 +55,9 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     limiter: (limit, windowMs) => new DbRateLimiter(db, limit, windowMs),
     cron: async () => {
       await ctx.freshen();
-      // Sends and scoring side by side: a send waiting out its pause doesn't hold up a list being scored.
+      // Sends, scoring and the look for new quiz leads side by side: a send waiting out its pause holds up neither.
       const deadline = invocationDeadline();
-      await Promise.all([ctx.sends?.tick({ deadline, lookaheadMs: 60_000 }), ctx.scoring?.tick({ deadline })]);
+      await Promise.all([ctx.sends?.tick({ deadline, lookaheadMs: 60_000 }), ctx.scoring?.tick({ deadline }), ctx.leads?.tick().then(logLeadCheck, (err) => console.error("leads:", err))]);
       await tidy(db);
     },
   });
