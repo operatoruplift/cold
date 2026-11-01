@@ -4,20 +4,14 @@ import {
   aiModel,
   ANGLES,
   draftMessage,
-  explainError,
   findProspects,
   prepCall,
   researchProspect,
   TONES,
   triageReply,
-  type AiOffer,
-  type AiProspect,
-  type AiProvider,
   type AiResult,
   type AiRun,
   type AiRunKind,
-  type AiSender,
-  type AiStore,
   type Angle,
   type FindResult,
   type Research,
@@ -25,7 +19,7 @@ import {
   type Triage,
 } from "../../ai";
 import { callSheetData } from "../../call";
-import { getOffer, type Account, type ColdConfig, type Offer } from "../../config";
+import { getOffer, type ColdConfig } from "../../config";
 import { allowedAngles } from "../../decide";
 import { prepareDmRun } from "../../dm";
 import { prepareEmailRun } from "../../email";
@@ -34,24 +28,11 @@ import { buildVariables, renderForProspect } from "../../outreach";
 import { parseCsv, type Prospect } from "../../prospects";
 import { twentyClient } from "../../touches";
 import { HttpError, json, readBody, type Route } from "../api";
-import { keepAlive } from "../background";
 import { OWN_LIST, type WebContext } from "../context";
 import { chooseStyle, draftStyle, evidenceFor } from "../decide/engine";
+import { offerOf, prospectOf, senderOf, SOURCE, startRun } from "./shared";
 
-export const offerOf = (offer?: Offer): AiOffer => ({
-  audience: offer?.variables.audience,
-  offer: offer?.variables.offer,
-  outcome: offer?.variables.outcome,
-  pain: offer?.variables.pain,
-  proof: offer?.variables.proof,
-});
-export const senderOf = (account: Account): AiSender & { phone?: string } => ({
-  name: account.variables.sender_name ?? account.variables.sender_first_name,
-  company: account.variables.sender_company,
-  voice: account.voice,
-  phone: account.variables.sender_phone,
-});
-export const prospectOf = (p: Prospect): AiProspect => ({ name: p.label, ...p.variables });
+export { offerOf, prospectOf, senderOf, SOURCE, startRun } from "./shared";
 
 /** A CSV cell: quoted when it needs to be, and never read as a formula. */
 function cell(value: string | undefined): string {
@@ -62,37 +43,12 @@ function cell(value: string | undefined): string {
 const csvText = (headers: string[], rows: Array<Record<string, string | undefined>>) =>
   [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h])).join(","))].join("\n") + "\n";
 
-/** The prospect sources the API accepts, as in the main API. */
-export const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
 /** Only http(s) links from research reach the page. */
 const httpOnly = (urls: string[] | undefined) => (urls ?? []).filter((u) => /^https?:\/\//i.test(u));
 
 const AI_COLUMNS = ["id", "first_name", "last_name", "title", "company", "email", "phone", "website", "city", "trigger", "linkedin_url", "instagram_handle", "facebook_url", "notes", "sources"];
 const host = (url?: string | null) => (url ? url.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]!.toLowerCase() : "");
 
-/**
- * Start a run and return at once; the work carries on and lands in the
- * database, where the app picks it up from /api/ai/runs/:id. No request waits
- * on a model, so no proxy in front (Railway's, Vercel's) can time one out.
- */
-export async function startRun<T>(
-  ai: AiStore,
-  kind: AiRunKind,
-  subject: string | undefined,
-  input: unknown,
-  work: (runId: string) => Promise<AiResult<T> & { provider?: AiProvider }>,
-  provider: AiProvider = "claude",
-): Promise<string> {
-  const runId = await ai.start(kind, subject, input, provider);
-  keepAlive(
-    Promise.resolve()
-      .then(() => work(runId))
-      .then((result) => ai.finish(runId, result))
-      .catch((err) => ai.fail(runId, explainError(err).message))
-      .catch((err) => console.error(`AI run ${runId} could not be saved:`, err)),
-  );
-  return runId;
-}
 
 /**
  * The AI routes, all behind the login. Every request to Claude runs in the

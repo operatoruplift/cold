@@ -236,6 +236,8 @@ is to buy, and says how to write to them:
   step and the reasons; an unsure call is flagged for you to check.
 - **Drafts** are written in the tone and opening picked for that person,
   around their need. You can pick your own.
+- **Whole lists** are scored on the server, so a list of hundreds carries on
+  after you close the page.
 - **Campaigns** can send to the highest scores first when the daily cap
   can't reach everyone.
 - **It learns.** Each approved draft's tone and opening is matched to what

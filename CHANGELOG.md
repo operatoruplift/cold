@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Whole lists are scored on the server.** Score and prioritize starts a
+  job that carries on when the page is closed: a few prospects at a time,
+  each saved as it finishes, carried on by the cron job on Vercel and the
+  app's timer on your computer, with retries, a Stop button and live
+  progress. One job per list and offer, up to 500 prospects each.
 - **The decision engine.** Prospects has a new tab, **Score and prioritize**:
   - **Diligence** reads a prospect's public website (only public addresses,
     redirects re-checked, robots.txt honoured, size and time limits) and

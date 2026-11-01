@@ -277,3 +277,20 @@ export interface StyleChoice {
 }
 
 export type InsightsResponse = StyleInsights;
+
+/** A list being scored on the server, and how far it has got. */
+export interface ScoreJobView {
+  id: string;
+  status: "running" | "done" | "stopped";
+  source: string;
+  offer: string;
+  deep: boolean;
+  total: number;
+  counts: { pending: number; working: number; done: number; skipped: number; failed: number };
+  /** Why it ended early, when it did: no key, no config. */
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** The last few prospects it finished. */
+  recent: Array<{ label: string; status: "done" | "skipped" | "failed"; note?: string; score?: number; tier?: Tier }>;
+}

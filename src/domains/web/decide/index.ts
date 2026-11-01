@@ -1,39 +1,19 @@
 import { aiConfigured, aiModel, explainError } from "../../ai";
-import { DEFAULT_DECIDE, getOffer, offerKeyOf, type ColdConfig } from "../../config";
-import {
-  buildInsights,
-  collectSite,
-  combine,
-  decisionState,
-  diligenceWithClaude,
-  diligenceWithSubq,
-  jevConfigured,
-  jevProvider,
-  outboundQuestions,
-  subqConfigured,
-  subqReader,
-  type Decision,
-  type DecisionInput,
-} from "../../decide";
+import { DEFAULT_DECIDE, offerKeyOf, type ColdConfig } from "../../config";
+import { buildInsights, jevConfigured, jevProvider, subqConfigured, subqReader, type Decision } from "../../decide";
 import type { Prospect } from "../../prospects";
 import { HttpError, json, readBody, type Route } from "../api";
-import { offerOf, prospectOf, senderOf, SOURCE, startRun } from "../ai";
+import { SOURCE, startRun, type PreparedRun } from "../ai/shared";
+import { invocationDeadline, keepAlive } from "../background";
 import type { WebContext } from "../context";
-import type { DecideStatusResponse, ProspectDecisionResponse, ScoresResponse, ScoreSummary } from "../types";
-import { evidenceFor, resolveLearning } from "./engine";
+import type { DecideStatusResponse, ProspectDecisionResponse, ScoreJobView, ScoresResponse, ScoreSummary } from "../types";
+import { evidenceFor, NotReady, prepareDiligence, prepareScore, resolveLearning, Skip } from "./engine";
+import { AlreadyScoring, MAX_PROSPECTS } from "./jobs";
 
-export { chooseStyle, draftStyle, evidenceFor } from "./engine";
+export { chooseStyle, draftStyle, evidenceFor, websiteOf } from "./engine";
 
-/** Free mailbox providers: their domain is not the business's website. */
-const FREE_MAIL = /@(gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|icloud|me|mac|aol|proton|protonmail|pm|gmx|mail|zoho|yandex|fastmail|hey)\./i;
-
-/** A prospect's website: the list's, else their email's domain when it's a business address. */
-export function websiteOf(prospect: Prospect): string | undefined {
-  const listed = prospect.variables.website?.trim();
-  if (listed) return listed;
-  const email = prospect.email?.trim();
-  return email && !FREE_MAIL.test(email) && email.includes("@") ? `https://${email.split("@")[1]}` : undefined;
-}
+/** A prospect left alone is a conflict; an engine with no key yet is a request it can't serve. */
+const asHttp = (err: unknown) => (err instanceof Skip ? new HttpError(409, err.message) : err instanceof NotReady ? new HttpError(400, err.message) : err);
 
 const summary = (d: Decision): ScoreSummary => ({
   score: d.score,
@@ -77,15 +57,22 @@ export function decideRoutes(ctx: WebContext): Route[] {
     return prospect;
   }
 
-  const history = async (c: ColdConfig, p: Prospect) => (await ctx.store(c)).forProspects(p.identities);
-
-  function decider(c: ColdConfig) {
+  /** Start a prepared run in the background, or say in words why it can't start. */
+  async function start<T>(prepare: () => Promise<PreparedRun<T>>): Promise<Response> {
+    const { ai } = stores();
+    let run: PreparedRun<T>;
     try {
-      return ctx.decider(c.decide);
+      run = await prepare();
     } catch (err) {
-      throw new HttpError(400, (err as Error).message);
+      throw asHttp(err);
     }
+    return json({ runId: await startRun(ai, run.kind, run.subject, run.input, run.work, run.provider) }, 202);
   }
+
+  const scoring = () => {
+    if (!ctx.scoring) throw new HttpError(500, "Scoring a list needs the app database.");
+    return ctx.scoring;
+  };
 
   return [
     [
@@ -147,65 +134,82 @@ export function decideRoutes(ctx: WebContext): Route[] {
       "POST",
       /^\/api\/decide\/diligence$/,
       async (request) => {
-        const { ai } = stores();
         const body = await readBody<{ source?: string; prospect?: string; offer?: string }>(request);
         const prospect = await prospectFrom(body.source, body.prospect);
-        if (prospect.doNotContact) throw new HttpError(409, `${prospect.label} is marked Do Not Contact, so COLD won't research them.`);
         const c = await config();
-        const offer = getOffer(c, body.offer || undefined);
-        const reader = ctx.reader(c.decide);
-        const claudeReady = aiConfigured() || !!ctx.options.aiCall;
-        if (!reader && !claudeReady) throw new HttpError(400, "Add a SubQ API key (SUBQ_API_KEY) or an Anthropic API key (ANTHROPIC_API_KEY) in Settings to run diligence.");
-        // Claude reads when there is no SubQ, and searches instead when SubQ would have no pages to read.
-        const call = claudeReady ? ctx.claude() : undefined;
-        const touches = await history(c, prospect);
-        const website = websiteOf(prospect);
-        const runId = await startRun(
-          ai,
-          "diligence",
-          prospect.key,
-          { source: body.source, prospect: prospect.key, label: prospect.label, website },
-          async () => {
-            const site = website ? await collectSite(website, ctx.options.pages) : { pages: [], skipped: [] };
-            const input = { offer: offerOf(offer), prospect: prospectOf(prospect), history: touches, pages: site.pages, skipped: site.skipped };
-            if (reader && (site.pages.length || !call)) return { ...(await diligenceWithSubq(reader, input)), provider: "subq" as const };
-            return { ...(await diligenceWithClaude(call!, input)), provider: "claude" as const };
-          },
-          reader ? "subq" : "claude",
-        );
-        return json({ runId }, 202);
+        return start(() => prepareDiligence(ctx, c, prospect, { source: body.source, offerKey: body.offer || undefined }));
       },
     ],
     [
       "POST",
       /^\/api\/decide\/score$/,
       async (request) => {
-        const { ai, decisions } = stores();
+        stores();
         const body = await readBody<{ source?: string; prospect?: string; offer?: string; account?: string }>(request);
         const prospect = await prospectFrom(body.source, body.prospect);
         const c = await config();
-        const offerKey = offerKeyOf(c, body.offer || undefined);
-        const touches = await history(c, prospect);
-        if (prospect.doNotContact || touches.some((t) => t.kind === "OPTED_OUT")) throw new HttpError(409, `${prospect.label} asked not to be contacted, so COLD won't score them.`);
-        const provider = decider(c);
-        const { dossier, research } = await evidenceFor(ctx, prospect.key);
-        const account = (body.account && c.accounts[body.account]) || Object.values(c.accounts)[0]!;
-        const runId = await startRun(
-          ai,
-          "decide",
-          prospect.key,
-          { source: body.source, prospect: prospect.key, label: prospect.label, offer: offerKey },
-          async (id) => {
-            const input: DecisionInput = { offer: offerOf(getOffer(c, offerKey || undefined)), sender: senderOf(account), prospect, dossier, research, history: touches, now: ctx.now() };
-            const result = await provider.decide({ state: decisionState(input), questions: outboundQuestions(input) });
-            const decision = combine(input, { ...result, provider: provider.name }, c.decide.reviewBelow);
-            await decisions.save(prospect.key, offerKey, id, decision);
-            return { output: decision, model: result.model, usage: result.usage, seen: [] };
-          },
-          provider.name,
-        );
-        return json({ runId }, 202);
+        return start(() => prepareScore(ctx, c, prospect, { source: body.source, offerKey: offerKeyOf(c, body.offer || undefined), accountKey: body.account }));
       },
+    ],
+    [
+      "POST",
+      /^\/api\/decide\/jobs$/,
+      async (request) => {
+        const { decisions } = stores();
+        const jobs = scoring();
+        const body = await readBody<{ source?: string; offer?: string; account?: string; deep?: boolean; which?: "unscored" | "all" }>(request);
+        const source = checkSource(body.source);
+        const c = await config();
+        const offer = offerKeyOf(c, body.offer || undefined);
+        // Fail now, not once per prospect, when nothing could be scored.
+        try {
+          ctx.decider(c.decide);
+          if (body.deep && !ctx.reader(c.decide) && !aiConfigured() && !ctx.options.aiCall) throw new NotReady("Add a SubQ API key (SUBQ_API_KEY) or an Anthropic API key (ANTHROPIC_API_KEY) in Settings to read their sites.");
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message);
+        }
+        // Nobody who asked not to be contacted: Do Not Contact on the list, or an opt-out in the touch log.
+        const optedOut = new Set((await (await ctx.store(c)).suppressions()).filter((t) => t.kind === "OPTED_OUT").map((t) => t.prospectKey));
+        let prospects = (await ctx.prospects(source)).filter((p) => !p.doNotContact && !p.identities.some((id) => optedOut.has(id)));
+        if (body.which !== "all") {
+          const scored = await decisions.forProspects(prospects.map((p) => p.key), offer);
+          prospects = prospects.filter((p) => !scored.has(p.key));
+        }
+        if (!prospects.length) throw new HttpError(409, body.which === "all" ? "There is nobody on this list to score." : "Everyone on this list is scored already for this offer.");
+        let job: { id: string; total: number };
+        try {
+          job = await jobs.start({ source, offer, account: body.account, deep: !!body.deep }, prospects.map((p) => ({ key: p.key, label: p.label })));
+        } catch (err) {
+          if (err instanceof AlreadyScoring) throw new HttpError(409, err.message, { jobId: err.jobId });
+          throw err;
+        }
+        // The first prospects start now; on Vercel the cron job carries on every minute after this function stops.
+        keepAlive(jobs.tick({ deadline: invocationDeadline() }).catch((err: unknown) => console.error("scoring:", err)));
+        return json({ jobId: job.id, total: job.total, capped: prospects.length > MAX_PROSPECTS }, 202);
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/decide\/jobs$/,
+      async (_request, _params, url) => {
+        const source = checkSource(url.searchParams.get("source"));
+        const c = await config();
+        const jobs: ScoreJobView[] = await scoring().recent({ source, offer: offerKeyOf(c, url.searchParams.get("offer") || undefined) });
+        return json({ jobs });
+      },
+    ],
+    [
+      "GET",
+      /^\/api\/decide\/jobs\/([\w-]+)$/,
+      async (_request, [id]) => {
+        const job = await scoring().view(id!);
+        return job ? json(job) : json({ error: "No such scoring job." }, 404);
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/decide\/jobs\/([\w-]+)\/stop$/,
+      async (_request, [id]) => json({ ok: await scoring().stop(id!) }),
     ],
     [
       "GET",

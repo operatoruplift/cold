@@ -220,6 +220,35 @@ const MIGRATIONS: string[] = [
      PRIMARY KEY (campaign_id, prospect_key, step)
    );
    CREATE INDEX style_assignments_open ON style_assignments (approved_at, outcome);`,
+  // Scoring a whole list on the server: the job, and each prospect in it with its result.
+  `CREATE TABLE score_jobs (
+     id TEXT PRIMARY KEY,
+     lane TEXT NOT NULL,
+     status TEXT NOT NULL,
+     spec TEXT NOT NULL,
+     total INTEGER NOT NULL,
+     error TEXT,
+     lease_until TEXT,
+     stop_requested INTEGER NOT NULL DEFAULT 0,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE UNIQUE INDEX score_jobs_one_per_list ON score_jobs (lane) WHERE status = 'running';
+   CREATE INDEX score_jobs_lane ON score_jobs (lane, created_at);
+   CREATE TABLE score_job_items (
+     job_id TEXT NOT NULL,
+     seq INTEGER NOT NULL,
+     prospect_key TEXT NOT NULL,
+     label TEXT NOT NULL,
+     status TEXT NOT NULL,
+     attempts INTEGER NOT NULL DEFAULT 0,
+     note TEXT,
+     score INTEGER,
+     tier TEXT,
+     updated_at TEXT,
+     PRIMARY KEY (job_id, seq)
+   );
+   CREATE INDEX score_job_items_status ON score_job_items (job_id, status);`,
 ];
 
 const statements = (script: string): Statement[] =>

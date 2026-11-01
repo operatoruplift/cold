@@ -96,6 +96,27 @@ it names: found, it is marked **Quote checked**; not found (the model
 paraphrased, or worse), it stays but is marked **Quote not found**, and the
 decision model is told so.
 
+## Scoring a whole list
+
+**Score the N not scored** (and **Read their sites first**, for a deep run)
+starts a job on the server, so a list of hundreds is scored without keeping
+the page open:
+
+- it works through the list a few prospects at a time, and saves each one as
+  it finishes; the Score tab shows how far it has got and the last results,
+  and the table fills in as scores land;
+- on Vercel the request that starts it begins the work, and the cron job
+  carries it on every minute; on your computer the app's timer does. Each
+  job is held by one runner at a time, and a runner that stops part-way is
+  taken over once its hold runs out;
+- a prospect that fails is tried again, up to three times, then marked failed
+  with the reason; someone who asked not to be contacted is left out before
+  the job starts;
+- a reason every prospect would hit (no key for any provider) ends the job
+  with that reason instead of failing each one;
+- **Stop** lets the prospects in hand finish and starts no more. One job per
+  list and offer at a time, up to 500 prospects each.
+
 ## The decision
 
 The decision model reads one state and answers ten typed questions about it.
@@ -222,6 +243,10 @@ All behind the login. Runs start in the background and are followed with
 | `GET /api/decide/scores?source=&offer=` | The latest decision for everyone on a list |
 | `GET /api/decide/prospect?prospect=&offer=` | One decision in full, with the dossier |
 | `GET /api/decide/insights?refresh=1` | What's working (works out new outcomes first) |
+| `POST /api/decide/jobs` | `{ source, offer?, account?, deep?, which?: "unscored" \| "all" }`: score a whole list on the server |
+| `GET /api/decide/jobs?source=&offer=` | The latest jobs for a list and offer |
+| `GET /api/decide/jobs/:id` | One job: status, counts, the last results |
+| `POST /api/decide/jobs/:id/stop` | Stop a job after the prospects in hand |
 | `POST /api/ai/draft` | Now takes `tone` and `angle`, and answers with the style used and why |
 
 ## Where the code is
@@ -238,7 +263,7 @@ All behind the login. Runs start in the background and are followed with
 | `src/domains/decide/learn.ts` | Outcomes, Thompson sampling, What's working |
 | `src/domains/decide/store.ts` | Decisions and style assignments in the database |
 | `src/domains/ai/style.ts` | The tone and opening guides the writer follows |
-| `src/domains/web/decide/` | The routes, and the style pick for drafts |
+| `src/domains/web/decide/` | The routes, the style pick for drafts, and scoring jobs (`jobs.ts`) |
 | `src/web/pages/score.tsx` | The Score tab |
 
 ## Selling it to other businesses
@@ -279,9 +304,8 @@ builds on what is here.
 
 ### 3. Work at the size of a real list
 
-- **A job queue for diligence and scoring**, like the one sends already use
-  (leases, resumable, picked up by the cron tick), so a list of a thousand is
-  scored on the server, not by a browser tab left open.
+- **Scoring on the server**: done (see Scoring a whole list). Next, bigger
+  jobs than 500, and a fair share between workspaces when there are several.
 - **Re-score on events**: a new trigger, a reply, a bounce, or a month passing.
 - **CRM sync** both ways: Twenty is built in; HubSpot and Pipedrive next.
   Scores, tiers and needs written back as fields.

@@ -408,3 +408,7 @@ ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
   .factor-reason { grid-column: 1 / -1; }
 }
 .need-line { margin-top: 3px; font-size: 12.5px; color: #075a99; max-width: 420px; }
+.job-panel { border: 1px solid #c9e8fb; border-radius: 12px; background: #fff; padding: 12px 14px; }
+.job-recent { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.job-recent li { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.job-recent li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -40,8 +40,9 @@ const db = await openDatabase(path.join(ROOT, ".cold", "cold.db"));
 const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
 const waitlist = new Waitlist(db);
 const ctx = new WebContext({ root: ROOT, db });
-// Sends are kept in the database: carry on with any that were under way when the server last stopped.
+// Sends and scoring jobs are kept in the database: carry on with any that were under way when the server last stopped.
 setInterval(() => void ctx.sends?.tick().catch((err) => console.error("send:", err)), 5000).unref();
+setInterval(() => void ctx.scoring?.tick().catch((err) => console.error("scoring:", err)), 5000).unref();
 // In production the site and the app come ready from `bun run build` (the Dockerfile runs it), so the
 // server starts faster and smaller. Otherwise they're bundled now, so `bun run ui` shows your latest changes.
 const bundled = (process.env.NODE_ENV === "production" && readBundle(path.join(APP_ROOT, DIST))) || (await bundle(APP_ROOT));

@@ -10,7 +10,7 @@ import type { EmailDraft, MailTransport } from "../../email";
 import { createApi } from "../api";
 import { aiRoutes } from "../ai";
 import { WebContext } from "../context";
-import type { Campaign, DecideStatusResponse, InsightsResponse, JobResponse, PlanResponse, ProspectDecisionResponse, ScoresResponse } from "../types";
+import type { Campaign, DecideStatusResponse, InsightsResponse, JobResponse, PlanResponse, ProspectDecisionResponse, ScoreJobView, ScoresResponse } from "../types";
 import { decideRoutes, websiteOf } from ".";
 
 const REPO = path.resolve(import.meta.dir, "../../../..");
@@ -228,5 +228,53 @@ describe("the decision engine, end to end", () => {
     expect(websiteOf(p({ website: "clearview.example" }))).toBe("clearview.example");
     expect(websiteOf(p({}, "dana@clearview.example"))).toBe("https://clearview.example");
     expect(websiteOf(p({}, "dana.reyes@gmail.com"))).toBeUndefined();
+  });
+});
+
+describe("scoring a whole list on the server", () => {
+  async function jobDone(id: string): Promise<ScoreJobView> {
+    for (let i = 0; i < 300; i++) {
+      const { data } = await call<ScoreJobView>("GET", `/api/decide/jobs/${id}`);
+      if (data.status !== "running") return data;
+      await Bun.sleep(10);
+    }
+    throw new Error("the scoring job never finished");
+  }
+
+  test("a job scores everyone not scored yet, leaves out whoever opted out, and can be followed", async () => {
+    const started = await call<{ jobId: string; total: number }>("POST", "/api/decide/jobs", { source: LIST });
+    expect(started.status).toBe(202);
+    // Dana and Marcus are scored already and Priya opted out: Tom and Elena are left.
+    expect(started.data.total).toBe(2);
+    const job = await jobDone(started.data.jobId);
+    expect(job).toMatchObject({ status: "done", deep: false, counts: { done: 2, skipped: 0, failed: 0, pending: 0 } });
+    expect(job.recent.map((r) => r.label.split(" ")[0]).sort()).toEqual(["Elena", "Tom"]);
+    const { data } = await call<ScoresResponse>("GET", `/api/decide/scores?source=${encodeURIComponent(LIST)}`);
+    expect(Object.keys(data.scores)).toHaveLength(4);
+    const again = await call<{ error: string }>("POST", "/api/decide/jobs", { source: LIST });
+    expect(again.status).toBe(409);
+    expect(again.data.error).toBe("Everyone on this list is scored already for this offer.");
+    const { data: recent } = await call<{ jobs: ScoreJobView[] }>("GET", `/api/decide/jobs?source=${encodeURIComponent(LIST)}`);
+    expect(recent.jobs[0]!.id).toBe(started.data.jobId);
+  });
+
+  test("a deep job reads the sites of whoever has no diligence yet, then scores them, for any offer", async () => {
+    const before = await call<ScoresResponse>("GET", `/api/decide/scores?source=${encodeURIComponent(LIST)}&offer=social-listening`);
+    expect(Object.keys(before.data.diligence).sort()).toHaveLength(2);
+    const started = await call<{ jobId: string; total: number }>("POST", "/api/decide/jobs", { source: LIST, offer: "social-listening", deep: true, which: "all" });
+    expect(started.data.total).toBe(4);
+    const job = await jobDone(started.data.jobId);
+    expect(job.counts).toMatchObject({ done: 4, failed: 0 });
+    const after = await call<ScoresResponse>("GET", `/api/decide/scores?source=${encodeURIComponent(LIST)}&offer=social-listening`);
+    expect(Object.keys(after.data.diligence)).toHaveLength(4);
+    expect(Object.keys(after.data.scores)).toHaveLength(4);
+    // Scores are kept per offer: the default offer's are untouched.
+    expect(after.data.offer).toBe("social-listening");
+  });
+
+  test("bad requests are refused in words", async () => {
+    expect((await call("POST", "/api/decide/jobs", { source: "file:/etc/passwd" })).status).toBe(400);
+    expect((await call("GET", "/api/decide/jobs/nope")).status).toBe(404);
+    expect((await call<{ ok: boolean }>("POST", "/api/decide/jobs/nope/stop")).data).toEqual({ ok: false });
   });
 });

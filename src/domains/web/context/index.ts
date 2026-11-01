@@ -10,6 +10,8 @@ import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects"
 import { DbFiles, DiskFiles, EnvFileSecrets, type Files, type Secrets } from "../../storage";
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
 import { CampaignStore } from "../campaigns";
+import { processScoreItem } from "../decide/engine";
+import { ScoreJobs } from "../decide/jobs";
 import { SendJobs } from "../sends";
 
 export interface WebContextOptions {
@@ -61,6 +63,8 @@ export class WebContext {
   readonly sends?: SendJobs;
   /** The decision engine's decisions and what it learned; only with the database. */
   readonly decisions?: DecideStore;
+  /** Whole lists scored on the server, kept in the database; only with the database. */
+  readonly scoring?: ScoreJobs;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -74,6 +78,7 @@ export class WebContext {
     if (options.db) {
       this.ai = new AiStore(options.db, () => this.now());
       this.decisions = new DecideStore(options.db, () => this.now());
+      this.scoring = new ScoreJobs(options.db, { process: (spec, item) => processScoreItem(this, spec, item) });
       this.sends = new SendJobs(options.db, {
         // Opened when a send picks up, from what is saved now: on Vercel that may be a later function than the one that queued it.
         tools: async (plan) => {

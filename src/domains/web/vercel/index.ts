@@ -17,6 +17,9 @@ async function tidy(db: Db): Promise<void> {
   await db.batch([
     ["DELETE FROM rate_limits WHERE window_start < ?", now - 2 * 86_400_000],
     ["DELETE FROM sessions WHERE expires_at <= ?", new Date(now).toISOString()],
+    // Finished scoring jobs are kept a month; the scores themselves stay.
+    ["DELETE FROM score_job_items WHERE job_id IN (SELECT id FROM score_jobs WHERE status != 'running' AND updated_at < ?)", new Date(now - 30 * 86_400_000).toISOString()],
+    ["DELETE FROM score_jobs WHERE status != 'running' AND updated_at < ?", new Date(now - 30 * 86_400_000).toISOString()],
   ]);
 }
 
@@ -46,7 +49,9 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     limiter: (limit, windowMs) => new DbRateLimiter(db, limit, windowMs),
     cron: async () => {
       await ctx.freshen();
-      await ctx.sends?.tick({ deadline: invocationDeadline(), lookaheadMs: 60_000 });
+      // Sends and scoring side by side: a send waiting out its pause doesn't hold up a list being scored.
+      const deadline = invocationDeadline();
+      await Promise.all([ctx.sends?.tick({ deadline, lookaheadMs: 60_000 }), ctx.scoring?.tick({ deadline })]);
       await tidy(db);
     },
   });

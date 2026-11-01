@@ -46,10 +46,10 @@ describe("the database", () => {
   test("a new database gets every table, and migrating again changes nothing", async () => {
     const db = await openDatabase(":memory:");
     const tables = (await db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")).map((t) => t.name);
-    expect(tables).toEqual(["ai_drafts", "ai_runs", "decisions", "files", "meta", "owner", "rate_limits", "secrets", "send_events", "send_jobs", "sessions", "style_assignments", "touches", "waitlist"]);
-    expect((await db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'"))?.value).toBe("4");
+    expect(tables).toEqual(["ai_drafts", "ai_runs", "decisions", "files", "meta", "owner", "rate_limits", "score_job_items", "score_jobs", "secrets", "send_events", "send_jobs", "sessions", "style_assignments", "touches", "waitlist"]);
+    expect((await db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'"))?.value).toBe("5");
     await migrate(db);
-    expect((await db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'"))?.value).toBe("4");
+    expect((await db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'"))?.value).toBe("5");
   });
 
   test("a file from before the version moved into meta keeps its data and gains the new tables", async () => {
