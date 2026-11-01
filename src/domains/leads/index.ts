@@ -1,5 +1,5 @@
 import { DEFAULT_CALL_HOURS, type CallHours } from "../config";
-import type { Db } from "../db";
+import { claimRun, type Db } from "../db";
 import { loadAgencyLeads } from "../prospects";
 import type { Touch } from "../touches";
 import { filterValue, type TwentyClient } from "../twenty";
@@ -53,7 +53,7 @@ export class LeadWatch {
     const now = this.now();
     if (now.getTime() < this.nextAt) return skipped;
     this.nextAt = now.getTime() + CLAIM_MS;
-    if (!(await this.claim(now))) return skipped;
+    if (!(await claimRun(this.options.db, LOOKED_KEY, now, CLAIM_MS))) return skipped;
 
     const seen = await this.options.db.get<{ value: string }>("SELECT value FROM meta WHERE key = ?", SEEN_KEY);
     if (!seen) {
@@ -91,17 +91,6 @@ export class LeadWatch {
     } catch (err) {
       return { looked: true, alerted, found, error: (err as Error).message };
     }
-  }
-
-  /** Claim this minute's look in the database; false when another server (or this one) looked under a minute ago. */
-  private async claim(now: Date): Promise<boolean> {
-    const { changes } = await this.options.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value WHERE meta.value <= ?",
-      LOOKED_KEY,
-      now.toISOString(),
-      new Date(now.getTime() - CLAIM_MS).toISOString(),
-    );
-    return changes > 0;
   }
 
   private async setSeen(at: string): Promise<void> {

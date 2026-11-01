@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The dialer's calls come back.** Every call the dialer logs with an
+  outcome becomes a touch in COLD, on the business's or the quiz lead's
+  timeline: the outcome, the dialer's AI score and tone, and its summary,
+  once the call has settled. It runs every ten minutes in the background (on
+  your computer and on Vercel, once across servers), from **Log calls** on
+  Calls, or with `cold call log`, and a call is never logged twice.
+  - A call where you talked with them (interested, appointment set, call
+    back, not interested) pauses their sequences for 90 days, like a reply.
+  - "Do not call" is an opt-out: nothing goes to them on any channel, and the
+    dialer's prospect is marked Do Not Contact.
+  - The decision engine reads the calls in their history. Someone who opted
+    out is always skipped; "not interested" on a recent call turns reach out
+    now into later; a wrong or bad number is no longer a way to reach them;
+    and skipping someone who was interested goes to you to check.
+  - Quiz leads say how their last call went.
 - **Calls at their hour.** A call sheet for a prospect, in the app and from
   `cold call sheet`, says what time it is where they are and whether it is
   inside calling hours: 8am to 9pm every day unless cold.yaml's new `calls:`

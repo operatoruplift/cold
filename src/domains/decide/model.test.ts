@@ -119,6 +119,21 @@ describe("the decision", () => {
     expect(unreachable.reviewReasons[0]).toContain("no way to reach them");
   });
 
+  test("the dialer's calls: an opt-out is a skip, \"not interested\" waits, a wrong number is no way in", () => {
+    const call = (disposition: string, at: string, kind: Touch["kind"] = "CALLED"): Touch => ({ kind, channel: "CALL", templateId: `dialer:${disposition}`, subject: disposition, prospectKey: "csv:1", occurredAt: at });
+    const optedOut = combine(input({ history: [call("DNC", "2026-10-30T15:00:00Z", "OPTED_OUT")] }), answers());
+    expect(optedOut.action).toBe("skip");
+    expect(optedOut.reviewReasons[0]).toBe('The engine suggested "Reach out now", overruled because they opted out.');
+    const notInterested = combine(input({ history: [call("NOT_INTERESTED", "2026-10-20T15:00:00Z")] }), answers());
+    expect(notInterested.action).toBe("nurture");
+    expect(notInterested.reviewReasons[0]).toContain("they said they weren't interested on a call on 2026-10-20");
+    expect(combine(input({ history: [call("NOT_INTERESTED", "2026-06-01T15:00:00Z")] }), answers()).action).toBe("contact_now");
+    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-30T15:00:00Z")])).toEqual(["email"]);
+    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-28T15:00:00Z"), call("GOOD_NUMBER", "2026-10-30T15:00:00Z")])).toEqual(["email", "phone"]);
+    const interested = combine(input({ history: [call("INTERESTED", "2026-10-30T15:00:00Z")] }), answers({ action: choice("skip", 0.9) }));
+    expect(interested.reviewReasons).toContain('It says skip, but the dialer logged "interested" on a call on 2026-10-30.');
+  });
+
   test("an unsure call, a contradiction, or a decision on the list alone goes to you to check", () => {
     expect(combine(input(), answers({ action: choice("contact_now", 0.5) })).reviewReasons).toEqual(["It isn't sure about the next step (confidence 50%)."]);
     const contradiction = combine(input(), answers({ need: { type: "noul", noul: 0.05 }, timing: { type: "noul", noul: 0.05 }, authority: { type: "noul", noul: 0.1 }, fit: { type: "noul", noul: 0.4 } }));

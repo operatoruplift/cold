@@ -1,5 +1,5 @@
 import { askWithResearch, hostOf, isHttp, normalizeUrl, nullable, offerBlock, prospectBlock, tag, type AiOffer, type AiProspect, type AiResult, type MessagesCall } from "../ai";
-import type { Touch } from "../touches";
+import { callOutcome, DISPOSITION_LABELS, type Touch } from "../touches";
 import type { Page } from "./pages";
 import { extractJson, type LongReader } from "./subq";
 
@@ -96,12 +96,14 @@ const SCHEMA = {
 
 const day = (iso: string) => iso.slice(0, 10);
 
-/** The history with a prospect, one line per touch, oldest first. */
+/** The history with a prospect, one line per touch, oldest first: a call from the dialer with its outcome and what was said. */
 export function historyLines(touches: Touch[]): string[] {
   return [...touches]
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt))
     .slice(-20)
     .map((t) => {
+      const outcome = callOutcome(t);
+      if (outcome) return `${day(t.occurredAt)}: phone call, ${t.subject ?? DISPOSITION_LABELS[outcome]}${t.body ? `: "${t.body.replace(/\s+/g, " ").trim().slice(0, 400)}"` : ""}`;
       const what = `${t.kind.toLowerCase().replace("_", " ")} ${t.channel.toLowerCase()}${t.step ? ` step ${t.step}` : ""}${t.sequence ? ` (${t.sequence.split("/").pop()})` : ""}`;
       const said = t.kind === "REPLIED" && t.body ? `: "${t.body.replace(/\s+/g, " ").trim().slice(0, 300)}"` : "";
       return `${day(t.occurredAt)}: ${what}${said}`;

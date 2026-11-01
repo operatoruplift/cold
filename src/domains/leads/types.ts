@@ -42,6 +42,8 @@ export interface QuizLead {
   from?: string;
   /** When they were last called, from the touch log. */
   calledAt?: string;
+  /** How that call went, when the dialer logged it: "Appointment set". */
+  callOutcome?: string;
   doNotContact: boolean;
   /** Whether they can be called now, in their own time. */
   callTime?: CallTime;

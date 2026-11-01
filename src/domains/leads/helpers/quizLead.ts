@@ -1,13 +1,14 @@
 import { callTime } from "../../callHours";
 import type { CallHours } from "../../config";
 import { leadNote, type Prospect } from "../../prospects";
-import type { Touch } from "../../touches";
+import { callOutcome, DISPOSITION_LABELS, type Touch } from "../../touches";
 import type { NtfyMessage, QuizLead } from "../types";
 
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
-/** One quiz lead for the Calls page: its record in Twenty, as a prospect, when it was last called, and whether it can be called now. Pure. */
-export function quizLead(record: Record<string, unknown>, prospect: Prospect, calledAt?: string, clock?: { hours: CallHours; now: Date }): QuizLead {
+/** One quiz lead for the Calls page: its record in Twenty, as a prospect, its last call, and whether it can be called now. Pure. */
+export function quizLead(record: Record<string, unknown>, prospect: Prospect, call?: Touch, clock?: { hours: CallHours; now: Date }): QuizLead {
+  const outcome = call && callOutcome(call);
   const v = prospect.variables;
   const qualification = (text(record.qualificationStatus) ?? "").toUpperCase();
   const status = (text(record.status) ?? "").toUpperCase();
@@ -23,17 +24,18 @@ export function quizLead(record: Record<string, unknown>, prospect: Prospect, ca
     qualified: qualification !== "DISQUALIFIED" && status !== "LOST",
     answers: Object.entries(leadNote(text(record.note)).answers).map(([q, a]) => `${q}: ${a}`),
     from: v.utm_source ?? v.lead_source,
-    calledAt,
+    calledAt: call?.occurredAt,
+    callOutcome: outcome ? DISPOSITION_LABELS[outcome] : undefined,
     doNotContact: prospect.doNotContact,
     callTime: clock ? callTime(prospect, clock.hours, clock.now) : undefined,
   };
 }
 
 /** The latest call to this prospect in the touch log, by any of their identities. Pure. */
-export function lastCall(prospect: Prospect, calls: Touch[]): string | undefined {
+export function lastCall(prospect: Prospect, calls: Touch[]): Touch | undefined {
   const ids = new Set(prospect.identities);
-  let latest: string | undefined;
-  for (const t of calls) if (t.channel === "CALL" && ids.has(t.prospectKey) && (!latest || t.occurredAt > latest)) latest = t.occurredAt;
+  let latest: Touch | undefined;
+  for (const t of calls) if (t.channel === "CALL" && ids.has(t.prospectKey) && (!latest || t.occurredAt > latest.occurredAt)) latest = t;
   return latest;
 }
 

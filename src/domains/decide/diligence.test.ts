@@ -98,6 +98,11 @@ describe("diligence", () => {
     ]);
     expect(lines).toEqual(["2026-10-01: sent linkedin", '2026-10-05: replied email step 1: "Not now, maybe after the new year."']);
   });
+
+  test("a call from the dialer reads as its outcome and what the dialer's AI made of it", () => {
+    const lines = historyLines([{ kind: "CALLED", channel: "CALL", templateId: "dialer:INTERESTED", subject: "Interested, AI score 82, positive tone", body: "Owner wants\na demo next week.", prospectKey: "k", occurredAt: "2026-10-06T10:00:00Z" } as Touch]);
+    expect(lines).toEqual(['2026-10-06: phone call, Interested, AI score 82, positive tone: "Owner wants a demo next week."']);
+  });
 });
 
 describe("SubQ", () => {

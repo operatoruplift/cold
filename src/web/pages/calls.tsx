@@ -1,4 +1,4 @@
-import { Clock, ListChecks, Phone, PhoneCall, PhoneOff, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { Clock, History, ListChecks, Phone, PhoneCall, PhoneOff, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CallPrep } from "../../domains/ai/tasks";
 import type { CallSheet } from "../../domains/call";
@@ -11,6 +11,7 @@ import { api, ApiError, useApi } from "../lib/api";
 import { ago, voiceLabel } from "../lib/format";
 import { Button, Empty, ErrorNotice, Field, Loading, Modal, Notice, PageHeader, Pill, Tabs } from "../ui/kit";
 import { ProspectPicker } from "../ui/prospectPicker";
+import { useToast } from "../ui/toast";
 
 export function CallsPage() {
   const library = useApi<LibraryResponse>("/api/library");
@@ -20,7 +21,23 @@ export function CallsPage() {
   const [source, setSource] = useState("");
   const [prospect, setProspect] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [logging, setLogging] = useState(false);
+  const toast = useToast();
   const leads = useApi<LeadsResponse>("/api/leads");
+
+  /** The dialer's calls into the touch log now, instead of within ten minutes. */
+  async function logCalls() {
+    setLogging(true);
+    try {
+      const result = await api<ActionResponse>("/api/calls/log", { method: "POST", body: {} });
+      toast.success([result.message, ...(result.lines ?? [])].join("\n"));
+      leads.reload();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLogging(false);
+    }
+  }
   const leadId = query.get("lead") ?? "";
   const lead = leads.data?.leads.find((l) => l.id === leadId);
   const due = (leads.data?.leads ?? []).filter((l) => l.qualified && !l.calledAt && !l.doNotContact);
@@ -97,9 +114,14 @@ export function CallsPage() {
                 )
               }
               actions={
-                <Button icon={RefreshCw} onClick={() => setSyncing(true)}>
-                  Sync to dialer
-                </Button>
+                <span className="row wrap" style={{ gap: 8 }}>
+                  <Button icon={History} loading={logging} onClick={logCalls} title="Log the dialer's calls, with their outcomes, into the touch log now (it also happens every ten minutes)">
+                    Log calls
+                  </Button>
+                  <Button icon={RefreshCw} onClick={() => setSyncing(true)}>
+                    Sync to dialer
+                  </Button>
+                </span>
               }
             />
             {lead && <LeadCard lead={lead} onClose={() => setQuery({ lead: undefined })} />}
@@ -174,7 +196,12 @@ function LeadCard({ lead, onClose }: { lead: QuizLead; onClose: () => void }) {
             <b>{lead.label}</b>
             <Pill tone={lead.qualified ? "green" : "gray"}>{lead.qualified ? "Qualified" : "Disqualified"}</Pill>
             {lead.doNotContact && <Pill tone="red">Do Not Contact</Pill>}
-            {lead.calledAt && <Pill tone="purple">Called {ago(lead.calledAt)}</Pill>}
+            {lead.calledAt && (
+              <Pill tone="purple">
+                Called {ago(lead.calledAt)}
+                {lead.callOutcome ? `: ${lead.callOutcome.toLowerCase()}` : ""}
+              </Pill>
+            )}
           </span>
           <Button size="sm" icon={X} onClick={onClose}>
             Close

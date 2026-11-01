@@ -109,6 +109,10 @@ call scripts and the Do Not Contact list.
 - **Calls in the dialer.** One command writes the call scripts and objection
   answers into the dialer's `agencyScripts`, so they sit next to every live
   call. For a handset, `cold call sheet` prints one filled in for a prospect.
+  Every call the dialer makes comes back into the touch log with its outcome
+  and the dialer's AI summary: talking with someone pauses their sequences
+  like a reply, "do not call" is an opt-out on every channel, and the
+  decision engine reads the calls when it scores them.
 - **It tells you what works.** `cold stats` shows the reply rate of every
   message and every sequence, so you keep the winners and rewrite the rest.
 - **Checked like code.** `bun run check` type-checks, runs the tests (including

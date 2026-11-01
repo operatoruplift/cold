@@ -227,7 +227,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 /* Toasts */
 .toasts { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
-.toast { min-width: 260px; max-width: 420px; padding: 12px 14px; border-radius: var(--radius-card); background: var(--midnight); color: #fff; box-shadow: var(--shadow-overlay); display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.toast { min-width: 260px; max-width: 420px; white-space: pre-line; padding: 12px 14px; border-radius: var(--radius-card); background: var(--midnight); color: #fff; box-shadow: var(--shadow-overlay); display: flex; gap: 10px; align-items: center; font-size: 13px; }
 .toast.error { background: #6e1423; }
 .toast .btn { height: 28px; }
 

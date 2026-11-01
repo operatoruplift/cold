@@ -11,6 +11,7 @@ import { invocationDeadline } from "../background";
 import { WebContext } from "../context";
 import { clientAddress, createHandler, DbSetupCode } from "../server/handler";
 import { serverSettings } from "../server/settings";
+import { callRoutes, logCallSync } from "../calls";
 import { leadRoutes, logLeadCheck } from "../leads";
 import { listenRoutes } from "../listen";
 import { publicRoutes } from "../open";
@@ -47,7 +48,7 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     version: (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "dev").slice(0, 12),
     auth,
     waitlist: new Waitlist(db),
-    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx), ...leadRoutes(ctx)]),
+    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx), ...leadRoutes(ctx), ...callRoutes(ctx)]),
     setup,
     // Vercel sets X-Forwarded-For to the visitor's address itself.
     clientIp: clientAddress(settings.proxyHops, () => undefined),
@@ -55,9 +56,14 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     limiter: (limit, windowMs) => new DbRateLimiter(db, limit, windowMs),
     cron: async () => {
       await ctx.freshen();
-      // Sends, scoring and the look for new quiz leads side by side: a send waiting out its pause holds up neither.
+      // Sends, scoring, the look for new quiz leads and the dialer's calls side by side: a send waiting out its pause holds up none of them.
       const deadline = invocationDeadline();
-      await Promise.all([ctx.sends?.tick({ deadline, lookaheadMs: 60_000 }), ctx.scoring?.tick({ deadline }), ctx.leads?.tick().then(logLeadCheck, (err) => console.error("leads:", err))]);
+      await Promise.all([
+        ctx.sends?.tick({ deadline, lookaheadMs: 60_000 }),
+        ctx.scoring?.tick({ deadline }),
+        ctx.leads?.tick().then(logLeadCheck, (err) => console.error("leads:", err)),
+        ctx.callLog?.tick().then(logCallSync, (err) => console.error("calls:", err)),
+      ]);
       await tidy(db);
     },
   });

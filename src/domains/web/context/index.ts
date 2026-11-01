@@ -13,6 +13,7 @@ import { xAppFromEnv, XClient, XStore, type XFetch } from "../../xApi";
 import { LISTEN_PREFIX, ListenStore, listenProspect } from "../../listen";
 import { LeadWatch } from "../../leads";
 import type { TwentyClient } from "../../twenty";
+import { CallLog } from "../calls/log";
 import { CampaignStore } from "../campaigns";
 import { processScoreItem } from "../decide/engine";
 import { ScoreJobs } from "../decide/jobs";
@@ -92,6 +93,8 @@ export class WebContext {
   readonly listening?: ListenStore;
   /** Pushes an alert when one of offer's quiz leads comes in; only with the database. */
   readonly leads?: LeadWatch;
+  /** Logs the dialer's calls into the touch log; only with the database. */
+  readonly callLog?: CallLog;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -118,6 +121,7 @@ export class WebContext {
       });
       this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
       this.listening = new ListenStore(options.db);
+      this.callLog = new CallLog(this, options.db);
       this.leads = new LeadWatch({ db: options.db, client: () => this.twenty(), appUrl: options.appUrl, hours: async () => (await this.config()).config?.calls ?? DEFAULT_CALL_HOURS, fetch: options.ntfyFetch, now: () => this.now() });
     }
   }

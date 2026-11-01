@@ -85,7 +85,9 @@ within 5 business days.
 - **Say who you are and why you're calling,** and give a number they can reach
   you on (`{{sender_phone}}` in the voicemail scripts).
 - **Keep an internal do-not-call list.** That is the dialer's Do Not Contact
-  status, and `cold` respects it.
+  status, and `cold` respects it. A call the dialer marks "do not call" is
+  logged in `cold` as an opt-out (every ten minutes, or `cold call log`), so
+  no email or DM goes to them either.
 
 ## DMs and platform rules
 

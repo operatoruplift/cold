@@ -89,7 +89,7 @@ describe("quiz leads", () => {
     const record = { id: "lead-1", contactName: "Sam Lee", note: note("Sam Lee"), createdAt: "2026-11-01T16:20:00.000Z" };
     const prospect = fromAgencyLead(record);
     const call = (prospectKey: string, occurredAt: string): Touch => ({ kind: "CALLED", channel: "CALL", prospectKey, occurredAt });
-    expect(lastCall(prospect, [call("agencyLeads:lead-1", "2026-11-01T17:00:00Z"), call("agencyLeads:lead-1", "2026-11-01T18:00:00Z"), call("email:other@x.com", "2026-11-01T19:00:00Z")])).toBe("2026-11-01T18:00:00Z");
+    expect(lastCall(prospect, [call("agencyLeads:lead-1", "2026-11-01T17:00:00Z"), call("agencyLeads:lead-1", "2026-11-01T18:00:00Z"), call("email:other@x.com", "2026-11-01T19:00:00Z")])?.occurredAt).toBe("2026-11-01T18:00:00Z");
     expect(lastCall(prospect, [{ ...call("agencyLeads:lead-1", "2026-11-01T17:00:00Z"), channel: "EMAIL", kind: "SENT" }])).toBeUndefined();
   });
 
