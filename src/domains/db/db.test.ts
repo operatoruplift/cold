@@ -85,7 +85,12 @@ describe("the database", () => {
 
   test("finds the database in the environment the Turso integration sets", () => {
     expect(databaseFromEnv({})).toBeUndefined();
-    expect(databaseFromEnv({ TURSO_DATABASE_URL: "libsql://cold.turso.io", TURSO_AUTH_TOKEN: "t" })).toEqual({ url: "libsql://cold.turso.io", authToken: "t" });
-    expect(databaseFromEnv({ COLD_DATABASE_URL: "libsql://mine", TURSO_DATABASE_URL: "libsql://other" })).toEqual({ url: "libsql://mine", authToken: undefined });
+    expect(databaseFromEnv({ TURSO_DATABASE_URL: "libsql://cold.turso.io", TURSO_AUTH_TOKEN: "t" })).toEqual({ url: "libsql://cold.turso.io", authToken: "t", from: "TURSO_DATABASE_URL" });
+    expect(databaseFromEnv({ COLD_DATABASE_URL: "libsql://mine", TURSO_DATABASE_URL: "libsql://other" })).toEqual({ url: "libsql://mine", authToken: undefined, from: "COLD_DATABASE_URL" });
+    // A database pinned with COLD_DATABASE_URL takes its own token, never the integration's.
+    expect(databaseFromEnv({ COLD_DATABASE_URL: "libsql://mine", COLD_DATABASE_TOKEN: "m", TURSO_DATABASE_URL: "libsql://other", TURSO_AUTH_TOKEN: "theirs" })).toEqual({ url: "libsql://mine", authToken: "m", from: "COLD_DATABASE_URL" });
+    expect(databaseFromEnv({ COLD_DATABASE_URL: "libsql://mine", TURSO_AUTH_TOKEN: "theirs" })?.authToken).toBeUndefined();
+    // A blank one is skipped, not taken as "no database".
+    expect(databaseFromEnv({ COLD_DATABASE_URL: " ", TURSO_DATABASE_URL: "libsql://other" })?.from).toBe("TURSO_DATABASE_URL");
   });
 });

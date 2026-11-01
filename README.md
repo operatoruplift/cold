@@ -537,7 +537,7 @@ in [docs/compliance.md](docs/compliance.md). How to run the sequences well
 | `.env.local` | `TWENTY_BASE_URL`, `TWENTY_API_KEY`, one `SMTP_URL_*` and `IMAP_URL_*` per mailbox, `ANTHROPIC_API_KEY`, optional `TYPESAFE_API_KEY` (Jev), `SUBQ_API_KEY` (SubQ), `REACHER_URL` and `REACHER_SECRET`. Start from `.env.example`, or set them in Settings. |
 | `cold.yaml`, `decide:` | Who decides and who does diligence (`auto`, or pin one), when a call goes to you to check, and whether styles are explored. See [docs/decision-engine.md](docs/decision-engine.md). |
 | `.cold/cold.db` | The waitlist, your login and sessions, AI runs and drafts, decisions and what the engine learned, and email sends (SQLite). |
-| `COLD_DATABASE_URL`, `COLD_DATABASE_TOKEN` | Use a Turso (libSQL) database instead; the Turso integration on Vercel sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which work too. There your files, the touch log and saved keys live in it as well. |
+| `COLD_DATABASE_URL`, `COLD_DATABASE_TOKEN` | Use a Turso (libSQL) database instead; the Turso integration on Vercel sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`, which work too. These two come first, so they pin COLD to one database whatever the integration sets. There your files, the touch log and saved keys live in it as well. |
 | `COLD_SECRET_KEY` | On a database: encrypts the keys and passwords saved in Settings. |
 | `COLD_CONFIG` | Point at a config file somewhere else. |
 | `COLD_HOME` | Keep `cold.yaml`, `.env.local`, `.cold/`, prospect lists and a copy of `messages/` in another folder (a server's volume). |

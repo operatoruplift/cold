@@ -24,7 +24,10 @@ and AI drafts live in Turso, which is SQLite over the network.
 2. **Storage, Create Database, Turso**: pick the free plan and the region your
    functions run in (Washington, D.C., `iad1`, unless you changed it), and
    connect it to the project for Production and Preview. It adds
-   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+   `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. If the connection offers a
+   database (or branch) for each deployment, leave that off for Production:
+   COLD keeps your login and everything you save in one database, and a new
+   one per deployment starts it from scratch on every deploy.
 3. **Settings, Environment Variables**, as Sensitive, for Production and
    Preview:
    - `COLD_SECRET_KEY`: a long random string (`openssl rand -base64 36`). It
@@ -38,7 +41,10 @@ and AI drafts live in Turso, which is SQLite over the network.
    creates the tables and copies the message library into the database.
 5. Open the project's **Logs** and find
    `First run: create your login at https://…/app/?setup=…`. Open that link,
-   choose your email and password, and you're in.
+   choose your email and password, and you're in. Just above it is
+   `Database 1ab5e29a (from TURSO_DATABASE_URL), first used …`: after your
+   next deploy, the same fingerprint should appear again. If it changes,
+   see [Every deploy starts from scratch](#every-deploy-starts-from-scratch).
 
 Then, in the app's Settings, create cold.yaml and add your mailbox, Anthropic
 and Twenty keys: they are saved in the database, encrypted.
@@ -66,10 +72,41 @@ How it behaves:
   bun run cold owner
   ```
 
-- **Updates**: push to the branch Vercel deploys. Your data stays in Turso.
+- **Updates**: push to the branch Vercel deploys. Your data stays in Turso,
+  as long as every deployment uses the same database (below).
   The message library in the database is your copy, so new messages from an
   update are not copied over it; compare with the repository's `messages/` if
   you want them.
+
+### Every deploy starts from scratch
+
+Signs: after a deploy, the logs show a new setup code, the login you made is
+gone, and the `Database …` line at start shows a new fingerprint. Each
+deployment is getting its own database from the Turso connection. Older
+deployments keep their own, so nothing is lost, but the live site no longer
+sees it. Two ways to fix it:
+
+- **Turn it off.** In Vercel, **Storage**, open the Turso database. If its
+  settings for this project offer a database (or branch) for each
+  deployment, turn that off, at least for Production, and redeploy.
+- **Pin COLD to one database.** COLD uses `COLD_DATABASE_URL` and
+  `COLD_DATABASE_TOKEN` before the integration's variables. In Turso (from
+  the database's page in Vercel, **Open in Turso**), copy the database's
+  address (`libsql://…`) and create a token for it, or with the Turso CLI:
+
+  ```bash
+  turso db show <database> --url
+  ```
+
+  ```bash
+  turso db tokens create <database>
+  ```
+
+  Add both in the project's **Settings, Environment Variables**, as
+  Sensitive, for Production. Previews can keep the integration's own
+  databases, so they never touch your real data. Redeploy: the line at start
+  now says `(from COLD_DATABASE_URL)`, and its fingerprint stays the same
+  from one deploy to the next.
 
 ## With the Dockerfile
 

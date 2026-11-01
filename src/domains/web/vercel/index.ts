@@ -60,14 +60,15 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
 
 /**
  * One line at start, so the logs show which database each deployment is on:
- * a fingerprint of its address (never the address or the token) and when
- * COLD first used it. Deployments that print different lines are on
- * different databases, and a login made on one is not on the other.
+ * a fingerprint of its address (never the address or the token), the
+ * variable it came from, and when COLD first used it. Deployments that print
+ * different fingerprints are on different databases, and a login made on one
+ * is not on the other (docs/deploy.md says what to change).
  */
-export async function databaseNote(db: Db, url: string, now: () => Date = () => new Date()): Promise<string> {
+export async function databaseNote(db: Db, where: { url: string; from: string }, now: () => Date = () => new Date()): Promise<string> {
   const firstUsed = await metaValue(db, "first_used_at", () => now().toISOString());
-  const fingerprint = createHash("sha256").update(url).digest("hex").slice(0, 8);
-  return `Database ${fingerprint}, first used ${firstUsed}.`;
+  const fingerprint = createHash("sha256").update(where.url).digest("hex").slice(0, 8);
+  return `Database ${fingerprint} (from ${where.from}), first used ${firstUsed}.`;
 }
 
 /** Starts once per instance, on the first request, and is reused while the instance stays warm. */
@@ -75,7 +76,7 @@ async function boot(): Promise<(request: Request) => Promise<Response>> {
   const where = databaseFromEnv();
   if (!where) throw new Error("COLD needs its database: add Turso to this project (Vercel, Storage), or set COLD_DATABASE_URL and COLD_DATABASE_TOKEN.");
   const db = await connectDatabase(where);
-  console.log(await databaseNote(db, where.url));
+  console.log(await databaseNote(db, where));
   return createVercelApp(db);
 }
 

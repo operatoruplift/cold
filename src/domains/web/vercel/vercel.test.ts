@@ -106,13 +106,14 @@ describe("COLD as a Vercel function", () => {
 
   test("the logs say which database a deployment is on, without saying where it is", async () => {
     const other = await openDatabase(":memory:");
-    const url = "libsql://cold-operatoruplift.aws-us-east-1.turso.io";
-    const line = await databaseNote(other, url, () => new Date("2026-11-01T11:00:00Z"));
-    expect(line).toMatch(/^Database [0-9a-f]{8}, first used 2026-11-01T11:00:00.000Z\.$/);
-    expect(line).not.toContain("turso");
+    const where = { url: "libsql://cold-operatoruplift.aws-us-east-1.turso.io", from: "TURSO_DATABASE_URL" };
+    const line = await databaseNote(other, where, () => new Date("2026-11-01T11:00:00Z"));
+    expect(line).toMatch(/^Database [0-9a-f]{8} \(from TURSO_DATABASE_URL\), first used 2026-11-01T11:00:00.000Z\.$/);
+    expect(line).not.toContain("turso.io");
     // The same database a day later: the same line.
-    expect(await databaseNote(other, url, () => new Date("2026-11-02T09:00:00Z"))).toBe(line);
+    expect(await databaseNote(other, where, () => new Date("2026-11-02T09:00:00Z"))).toBe(line);
     // Another address: another fingerprint.
-    expect((await databaseNote(other, "libsql://cold-copy-operatoruplift.aws-us-east-1.turso.io")).slice(0, 17)).not.toBe(line.slice(0, 17));
+    const copy = await databaseNote(other, { ...where, url: "libsql://cold-copy-operatoruplift.aws-us-east-1.turso.io" });
+    expect(copy.slice(0, 17)).not.toBe(line.slice(0, 17));
   });
 });

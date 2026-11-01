@@ -305,15 +305,25 @@ export function libsqlDb(client: Pick<Client, "execute" | "batch" | "close">): D
   return new LibsqlDb(client);
 }
 
+/** Where a database address can come from, first match wins, each with its own token. */
+const DATABASE_VARIABLES = [
+  ["COLD_DATABASE_URL", "COLD_DATABASE_TOKEN"],
+  ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
+  ["LIBSQL_URL", "LIBSQL_AUTH_TOKEN"],
+] as const;
+
 /**
  * Where the database is, from the environment: COLD_DATABASE_URL, or what the
- * Turso integration sets (TURSO_DATABASE_URL, or LIBSQL_URL), with its token.
+ * Turso integration sets (TURSO_DATABASE_URL, or LIBSQL_URL). Each address
+ * takes the token named with it, so a database you pin with
+ * COLD_DATABASE_URL never gets the integration's token.
  */
-export function databaseFromEnv(env: Record<string, string | undefined> = process.env): { url: string; authToken?: string } | undefined {
-  const url = (env.COLD_DATABASE_URL ?? env.TURSO_DATABASE_URL ?? env.LIBSQL_URL)?.trim();
-  if (!url) return undefined;
-  const authToken = (env.COLD_DATABASE_TOKEN ?? env.TURSO_AUTH_TOKEN ?? env.LIBSQL_AUTH_TOKEN)?.trim() || undefined;
-  return { url, authToken };
+export function databaseFromEnv(env: Record<string, string | undefined> = process.env): { url: string; authToken?: string; from: string } | undefined {
+  for (const [urlName, tokenName] of DATABASE_VARIABLES) {
+    const url = env[urlName]?.trim();
+    if (url) return { url, authToken: env[tokenName]?.trim() || undefined, from: urlName };
+  }
+  return undefined;
 }
 
 /** A value stored once and kept: the first call makes it, later calls read it. */

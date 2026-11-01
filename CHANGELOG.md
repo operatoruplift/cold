@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The logs say which database each deployment is on**: at start, a
+  fingerprint of its address (never the address or the token), the variable
+  it came from, and when COLD first used it. If the fingerprint changes with
+  each deploy, the Turso connection is making a database per deployment;
+  [docs/deploy.md](docs/deploy.md#every-deploy-starts-from-scratch) says how
+  to turn that off or pin one with `COLD_DATABASE_URL`, which now always
+  takes `COLD_DATABASE_TOKEN`, never the integration's token.
+- **A replaced setup code says why** in the logs: after 20 wrong codes, a
+  warning comes just above the new one.
 - **Whole lists are scored on the server.** Score and prioritize starts a
   job that carries on when the page is closed: a few prospects at a time,
   each saved as it finishes, carried on by the cron job on Vercel and the
