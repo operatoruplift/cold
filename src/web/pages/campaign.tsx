@@ -1,8 +1,8 @@
 import { Ban, CalendarClock, Sparkles, CheckCircle2, ChevronDown, ChevronRight, Clock, Copy, Download, ExternalLink, Hourglass, Mail, MessageSquareReply, Pencil, RefreshCw, Send, SkipForward, Square, Trash2, UserX, XCircle } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { AiDraftRecord } from "../../domains/ai/store";
-import type { Campaign, JobEvent, JobResponse, PlanResponse, PlanRow } from "../../domains/web/types";
-import { navigate } from "../app/router";
+import type { Campaign, JobEvent, JobResponse, PlanResponse, PlanRow, XSendResponse } from "../../domains/web/types";
+import { Link, navigate } from "../app/router";
 import { useStatus } from "../app/status";
 import { api, ApiError, useApi } from "../lib/api";
 import { channelLabel, day, plural, sequenceName, sourceLabel, voiceLabel } from "../lib/format";
@@ -399,6 +399,23 @@ function DmQueue({ plan, campaign, drafts, onChange }: { plan: PlanResponse; cam
 
   const skip = useCallback(() => current && setSkipped((s) => new Set(s).add(current.key)), [current]);
 
+  // X DMs can go out from here, through X's API as the connected account: one click, one message.
+  const canSendOnX = plan.platform === "x" && !!plan.x?.ready;
+  const sendOnX = useCallback(async () => {
+    if (!current || busy || blocked || !canSendOnX) return;
+    setBusy("X");
+    try {
+      const result = await api<XSendResponse>(`/api/campaigns/${campaign.id}/dm/x`, { method: "POST", body: { prospect: current.key } });
+      setDone((s) => new Set(s).add(current.key));
+      toast.success(result.message);
+      onChange();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }, [current, busy, blocked, canSendOnX, campaign.id, onChange, toast]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement).closest("input, textarea, select")) return;
@@ -406,13 +423,14 @@ function DmQueue({ plan, campaign, drafts, onChange }: { plan: PlanResponse; cam
       if (key === "c") copy();
       else if (key === "p") open();
       else if (key === "k") skip();
+      else if (!blocked && key === "x") sendOnX();
       else if (!blocked && key === "s") record("SENT");
       else if (!blocked && key === "r") record("REPLIED");
       else if (!blocked && key === "o") record("OPTED_OUT");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [copy, open, skip, record, blocked]);
+  }, [copy, open, skip, record, sendOnX, blocked]);
 
   async function downloadChecklist() {
     const response = await fetch(`/api/campaigns/${campaign.id}/checklist`, { headers: { "x-cold": "1" } });
@@ -464,6 +482,11 @@ function DmQueue({ plan, campaign, drafts, onChange }: { plan: PlanResponse; cam
               </div>
               <AiDraft campaignId={campaign.id} row={current} channel="dm" existing={drafts.find((d) => d.prospectKey === current.key && d.step === (current.step ?? 1))} onChanged={onChange} />
               <div className="dm-actions">
+                {canSendOnX && (
+                  <Button variant="primary" icon={Send} loading={busy === "X"} disabled={blocked} onClick={sendOnX}>
+                    Send on X as @{plan.x!.username} <kbd>X</kbd>
+                  </Button>
+                )}
                 <Button icon={Copy} onClick={copy}>
                   Copy message <kbd>C</kbd>
                 </Button>
@@ -471,6 +494,11 @@ function DmQueue({ plan, campaign, drafts, onChange }: { plan: PlanResponse; cam
                   Open profile <kbd>P</kbd>
                 </Button>
               </div>
+              {plan.platform === "x" && !plan.x?.ready && plan.x?.why && (
+                <div className="hint">
+                  {plan.x.why} <Link to="/settings">Settings</Link>
+                </div>
+              )}
               {blocked && <Notice tone="amber">Create cold.yaml in Settings to log DMs: right now they would be signed and logged as the example sender.</Notice>}
               <div className="dm-outcomes">
                 <Button variant="success" icon={CheckCircle2} loading={busy === "SENT"} disabled={blocked} onClick={() => record("SENT")}>

@@ -157,6 +157,33 @@ export interface PlanResponse {
   pace?: { min: number; max: number };
   /** Why sending is not possible right now, in words. Empty when it is. */
   blockers: string[];
+  /** X DMs: whether the campaign's account can send through X's API, and as whom. */
+  x?: XSendState;
+}
+
+/** After Send on X: it went out, or they had replied, so nothing did. */
+export interface XSendResponse {
+  ok: boolean;
+  outcome: "SENT" | "REPLIED";
+  message: string;
+}
+
+/** Can cold send an X DM itself for this account? When not, why, in words. */
+export interface XSendState {
+  ready: boolean;
+  username?: string;
+  why?: string;
+}
+
+/** Settings, X: the developer app, the callback URL to register, and each account's connection. */
+export interface XStatusResponse {
+  /** X_CLIENT_ID is set. */
+  configured: boolean;
+  /** The app's database is there to keep sign-ins. */
+  available: boolean;
+  /** Register this as the callback URL of the app at developer.x.com. */
+  callbackUrl: string;
+  accounts: Array<{ key: string; voice: Voice; username?: string; connectedAt?: string }>;
 }
 
 /** What a send job reports, before it is timestamped. */

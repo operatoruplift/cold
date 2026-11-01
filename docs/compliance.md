@@ -23,7 +23,8 @@ the stakes are high.
   address and is flagged, so you can find who it forwards for.
 - **Keeps subjects honest.** Lint rejects a subject that pretends to be a
   reply or a forward. Only real follow-ups in a thread start with "Re:".
-- **Stops on bounces and invalid addresses**, and never automates DMs.
+- **Stops on bounces and invalid addresses**, and never automates DMs: an X
+  DM goes out only when you press Send on X, one approved message at a time.
 - **Keeps a record.** Every send, reply, bounce and opt-out is a `coldTouch`
   with a timestamp: what you sent, to whom, and when they said no.
 
@@ -85,9 +86,19 @@ within 5 business days.
 LinkedIn's User Agreement prohibits bots and other automated ways of sending
 messages and invitations. X's rules prohibit bulk, aggressive or unsolicited
 automated DMs. Meta's terms prohibit automated access to Instagram and
-Facebook. `cold` never sends a DM: it writes it, you send it. Keep the daily
-caps human, and when someone says no in a DM, log it (`o` in `cold dm run`, or
-`cold log --kind OPTED_OUT`). That stops every channel.
+Facebook. `cold` never automates a DM:
+
+- **X.** With an X account connected in Settings (your own X developer app,
+  through X's official API), **Send on X** sends the DM you approved, from
+  your account, when you press it: one message per click, within the daily
+  cap, never in a batch or on a timer. A follow-up is checked against the
+  conversation first and is not sent when they have answered. Without a
+  connection, X works like the others.
+- **LinkedIn, Instagram and Facebook.** `cold` writes the message, copies it
+  and opens the profile; you send it yourself.
+
+Keep the daily caps human, and when someone says no in a DM, log it (`o` in
+`cold dm run`, or `cold log --kind OPTED_OUT`). That stops every channel.
 
 ## Data and records
 

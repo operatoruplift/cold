@@ -22,6 +22,7 @@ import { aiRoutes } from "../ai";
 import { decideRoutes } from "../decide";
 import { createApi } from "../api";
 import { WebContext } from "../context";
+import { xCallback, xRoutes } from "../x";
 import { buildAssets, bundle, DIST, readBundle } from "./assets";
 import { clientAddress, createHandler, SetupCode } from "./handler";
 import { serverSettings } from "./settings";
@@ -60,9 +61,10 @@ const handler = createHandler({
   version: assets.version,
   auth,
   waitlist,
-  privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx)]),
+  privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx)]),
   setup,
   clientIp: clientAddress(settings.proxyHops, (request) => server.requestIP(request)?.address),
+  xCallback: xCallback(ctx),
 });
 
 try {

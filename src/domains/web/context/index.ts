@@ -7,8 +7,9 @@ import { claudeDecider, DecideStore, jevConfigured, jevProvider, subqConfigured,
 import { reacherFromEnv, smtpTransport, type MailTransport } from "../../email";
 import { loadLibraryFrom } from "../../messages";
 import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects";
-import { DbFiles, DiskFiles, EnvFileSecrets, type Files, type Secrets } from "../../storage";
+import { DbFiles, DiskFiles, EnvFileSecrets, secretKey, type Files, type Secrets } from "../../storage";
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
+import { xAppFromEnv, XClient, XStore, type XFetch } from "../../xApi";
 import { CampaignStore } from "../campaigns";
 import { processScoreItem } from "../decide/engine";
 import { ScoreJobs } from "../decide/jobs";
@@ -30,8 +31,19 @@ export interface WebContextOptions {
   /** How diligence reads prospects' websites. */
   pages?: Pick<CollectOptions, "fetch" | "resolve">;
   transport?: (account: Account) => MailTransport;
+  /** How cold reaches X's API (tests hand it a fake X). */
+  xFetch?: XFetch;
   now?: () => Date;
   random?: () => number;
+}
+
+/** COLD_SECRET_KEY as a key, or undefined when it is unset or unusable (the X store then says what to do). */
+function usableSecretKey(): Buffer | undefined {
+  try {
+    return secretKey();
+  } catch {
+    return undefined;
+  }
 }
 
 const PROSPECT_TTL_MS = 5 * 60 * 1000;
@@ -65,6 +77,8 @@ export class WebContext {
   readonly decisions?: DecideStore;
   /** Whole lists scored on the server, kept in the database; only with the database. */
   readonly scoring?: ScoreJobs;
+  /** X connections, sign-ins and sends through X's API; only with the database. */
+  readonly x?: XStore;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -89,7 +103,14 @@ export class WebContext {
         now: () => this.now(),
         random: options.random,
       });
+      this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
     }
+  }
+
+  /** X's API through the owner's developer app, once X_CLIENT_ID is set. */
+  xClient(): XClient | undefined {
+    const app = xAppFromEnv();
+    return app ? new XClient(app, this.options.xFetch, () => this.now()) : undefined;
   }
 
   /** Where your files are: a folder on this computer, or the database. */

@@ -249,6 +249,35 @@ const MIGRATIONS: string[] = [
      PRIMARY KEY (job_id, seq)
    );
    CREATE INDEX score_job_items_status ON score_job_items (job_id, status);`,
+  // X DMs through the official API: who each account is connected as (tokens
+  // sealed with COLD_SECRET_KEY when set), Connect X attempts, handles looked
+  // up, and each step sent once.
+  `CREATE TABLE x_connections (
+     account TEXT PRIMARY KEY,
+     user_id TEXT NOT NULL,
+     username TEXT NOT NULL,
+     tokens TEXT NOT NULL,
+     connected_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE x_oauth_states (
+     state TEXT PRIMARY KEY,
+     account TEXT NOT NULL,
+     verifier TEXT NOT NULL,
+     redirect_uri TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE x_users (handle TEXT PRIMARY KEY, user_id TEXT NOT NULL, updated_at TEXT NOT NULL);
+   CREATE TABLE x_sends (
+     account TEXT NOT NULL,
+     prospect_key TEXT NOT NULL,
+     sequence TEXT NOT NULL,
+     step INTEGER NOT NULL,
+     status TEXT NOT NULL,
+     event_id TEXT,
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (account, prospect_key, sequence, step)
+   );`,
 ];
 
 const statements = (script: string): Statement[] =>

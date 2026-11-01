@@ -26,6 +26,13 @@ describe("refuseRequest", () => {
     expect(refuseRequest(req("/api/health", { host: "10.0.0.7:8080" }), access)).toBeUndefined();
   });
 
+  test("lets X send the owner back to /api/x/callback, a plain page load, on this server's hosts only", () => {
+    expect(refuseRequest(req("/api/x/callback?state=s&code=c", { host: "127.0.0.1:4100" }), access)).toBeUndefined();
+    expect(refuseRequest(req("/api/x/callback?state=s&code=c", { host: "evil.example" }), access)).toBe("cold does not answer on evil.example");
+    expect(refuseRequest(new Request("http://127.0.0.1:4100/api/x/callback", { method: "POST", headers: { host: "127.0.0.1:4100" } }), access)).toBe("missing the x-cold header");
+    expect(refuseRequest(req("/api/x/connect", { host: "127.0.0.1:4100" }), access)).toBe("missing the x-cold header");
+  });
+
   test("a hosted server answers on its public name and origin", () => {
     const hosted = { hosts: ["cold.example.com"], origins: ["https://cold.example.com"] };
     expect(refuseRequest(req("/api/session", { host: "cold.example.com", "x-cold": "1", origin: "https://cold.example.com" }), hosted)).toBeUndefined();

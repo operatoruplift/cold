@@ -14,6 +14,7 @@ import { renderTemplate, VARIABLES } from "../../render";
 import { summarize } from "../../stats";
 import { TOUCH_KINDS, twentyClient, type Touch } from "../../touches";
 import { applySchema, readLiveSchema, twentyConfigFromEnv } from "../../twenty";
+import { handleOf, repliesIn, withXToken, XApiError, xUserIdOf, type XClient, type XDmEvent, type XStore } from "../../xApi";
 import { draftKey } from "../../ai";
 import { invocationDeadline, keepAlive } from "../background";
 import type { WebContext } from "../context";
@@ -31,6 +32,8 @@ import type {
   SourceOption,
   StatsResponse,
   StatusResponse,
+  XSendResponse,
+  XSendState,
 } from "../types";
 
 export class HttpError extends Error {
@@ -53,6 +56,34 @@ export async function readBody<T>(request: Request): Promise<T> {
     return (await request.json()) as T;
   } catch {
     throw new HttpError(400, "The request body must be JSON.");
+  }
+}
+
+/**
+ * X's refusal as an HTTP answer that says what to do next. Never 401: to the
+ * app a 401 means you were signed out of cold, not that X needs reconnecting.
+ */
+export function xHttpError(err: unknown): unknown {
+  if (!(err instanceof XApiError)) return err;
+  const status = err.kind === "rateLimited" ? 429 : err.kind === "notFound" ? 404 : err.kind === "other" ? 502 : 409;
+  return new HttpError(status, err.message);
+}
+
+/** The X store, X's API and cold.yaml, or a refusal that says which is missing. */
+export async function xTools(ctx: WebContext): Promise<{ store: XStore; client: XClient; config: ColdConfig }> {
+  if (!ctx.x) throw new HttpError(409, "Sending X DMs needs the app's database, which this server doesn't have.");
+  const client = ctx.xClient();
+  if (!client) throw new HttpError(409, "Set up X first: add your X developer app's X_CLIENT_ID (and X_CLIENT_SECRET) in Settings.");
+  const { config, error, isExample } = await ctx.config();
+  if (!config) throw new HttpError(400, error ?? "cold.yaml has problems.");
+  if (isExample) throw new HttpError(409, "cold.yaml does not exist yet: create it in Settings, so X is connected to your own account.");
+  return { store: ctx.x, client, config };
+}
+
+/** They answered on X since cold's last DM, so the next one is not sent. */
+class RepliedOnX extends Error {
+  constructor(readonly reply: XDmEvent) {
+    super("They replied on X.");
   }
 }
 
@@ -80,6 +111,8 @@ function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
   fields.set("SUBQ_API_KEY", "Optional: SubQ, Subquadratic's long-context model, reads a prospect's whole site for diligence. Without it Claude does (subq.ai)");
   fields.set("REACHER_URL", "Optional: a self-hosted Reacher, e.g. http://localhost:8080");
   fields.set("REACHER_SECRET", "Optional: Reacher's header secret");
+  fields.set("X_CLIENT_ID", "Optional: your X developer app's OAuth 2.0 Client ID, so X DMs go out from cold through X's API (developer.x.com). Then Connect X below");
+  fields.set("X_CLIENT_SECRET", "Optional: that app's OAuth 2.0 Client Secret (a Web App; leave it empty for a Native App)");
   return [...fields.entries()].map(([name, hint]) => ({ name, set: !!process.env[name]?.trim(), hint }));
 }
 
@@ -191,7 +224,16 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
       sentToday: prepared.sentToday,
       sendable: prepared.batch.length,
       blockers,
+      x: prepared.platform === "x" ? await xSendState(account.key) : undefined,
     };
+  }
+
+  /** Whether an account can send X DMs through X's API, and if not, why. */
+  async function xSendState(account: string): Promise<XSendState> {
+    if (!ctx.x) return { ready: false, why: "This server has no database to keep an X sign-in." };
+    if (!ctx.xClient()) return { ready: false, why: "Add your X developer app in Settings to send from here." };
+    const connected = (await ctx.x.accounts()).find((a) => a.account === account);
+    return connected ? { ready: true, username: connected.username } : { ready: false, why: `Connect X for ${account} in Settings to send from here.` };
   }
 
   /** Approved AI drafts replace the template's words for that prospect's step. */
@@ -491,6 +533,57 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
         if (outcome === "SENT" && !prepared.batch.includes(item)) throw new HttpError(409, `The daily cap of ${prepared.cap} is used up for today.`);
         await recordDmOutcome(store, prepared, item, outcome, ctx.now());
         return json({ ok: true });
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/campaigns\/([\w-]+)\/dm\/x$/,
+      async (request, [id]) => {
+        // One approved X DM, sent by the owner's click through X's API from their own account.
+        const campaign = await campaignOr404(id!);
+        const { prospect } = await readBody<{ prospect: string }>(request);
+        const { store: x, client, config } = await xTools(ctx);
+        const { sequence, account, offer } = resolveCampaign(campaign, (await ctx.library()).library, config);
+        if (sequence.channel !== "dm" || sequence.platform !== "x") throw new HttpError(400, "Only X DMs go out through X's API. On other platforms, copy the message and send it yourself.");
+        const store = await ctx.store(config);
+        const prepared = await withDmDrafts(await prepareDmRun({ sequence, account, offer, prospects: await ctx.prospects(campaign.source, campaign.where), store, now: () => ctx.now() }), campaign);
+        const item = prepared.queue.find((q) => q.prospect.key === prospect);
+        if (!item) throw new HttpError(409, "That DM is no longer due. Refresh the page.");
+        if (!prepared.batch.includes(item)) throw new HttpError(409, `The daily cap of ${prepared.cap} is used up for today.`);
+        const handle = handleOf(item.prospect.xHandle ?? item.url);
+        if (!handle) throw new HttpError(400, `${item.prospect.label} has no X handle cold can read: fix it in the list.`);
+
+        const key = { account: account.key, prospectKey: item.prospect.key, sequence: sequence.id, step: item.step.step ?? 1 };
+        const held = await x.claim(key);
+        if (held) throw new HttpError(409, held.status === "SENT" ? `This step already went out on X at ${held.at.slice(0, 16).replace("T", " ")} UTC. If it isn't logged yet, press "I sent it".` : "This DM is being sent right now: wait a moment, then refresh.");
+
+        let eventId: string;
+        try {
+          eventId = await withXToken(x, client, account.key, () => ctx.now(), async (token, connection) => {
+            const userId = await xUserIdOf(x, client, token, handle);
+            if (item.previous) {
+              // A follow-up: never send it to someone who has answered since.
+              const events = await client.dmEvents(token, { participantId: userId, limit: 100 });
+              const reply = repliesIn(events, { me: connection.userId, awaiting: new Map([[userId, { userId, sentAt: item.previous.occurredAt }]]), logged: new Set() })[0];
+              if (reply) throw new RepliedOnX(reply);
+            }
+            return (await client.sendDm(token, userId, item.text)).eventId;
+          });
+        } catch (err) {
+          await x.release(key);
+          if (err instanceof RepliedOnX) {
+            await recordDmOutcome(store, prepared, item, "REPLIED", new Date(err.reply.createdAt), { messageId: err.reply.id, body: err.reply.text });
+            return json({ ok: true, outcome: "REPLIED", message: `${item.prospect.label} replied on X, so nothing was sent: the reply is logged and their sequence stops.` } satisfies XSendResponse);
+          }
+          throw xHttpError(err);
+        }
+        await x.markSent(key, eventId);
+        try {
+          await recordDmOutcome(store, prepared, item, "SENT", ctx.now(), { messageId: eventId });
+        } catch (err) {
+          throw new HttpError(502, `Sent on X to @${handle}, but logging it failed (${(err as Error).message}). Press "I sent it" to log it.`);
+        }
+        return json({ ok: true, outcome: "SENT", message: `Sent on X to @${handle}.` } satisfies XSendResponse);
       },
     ],
     [
