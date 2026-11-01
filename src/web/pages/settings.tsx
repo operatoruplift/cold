@@ -1,6 +1,6 @@
-import { AtSign, CheckCircle2, Copy, Database, FileText, KeyRound, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, Unplug, UserRound, Wand2, XCircle } from "lucide-react";
+import { AtSign, CheckCircle2, Copy, Database, Ear, FileText, KeyRound, ListPlus, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, Unplug, UserRound, Wand2, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ActionResponse, AiStatusResponse, SessionsResponse, SettingsResponse, XStatusResponse } from "../../domains/web/types";
+import type { ActionResponse, AiStatusResponse, ListenStatusResponse, SessionsResponse, SettingsResponse, XStatusResponse } from "../../domains/web/types";
 import { usePwa, install } from "../app/pwa";
 import { useSession } from "../app/session";
 import { useStatus } from "../app/status";
@@ -133,10 +133,86 @@ export function SettingsPage() {
       </div>
 
       <XCard />
+      <ListenCard />
 
       {settings.loading && !settings.data ? <Loading /> : settings.error ? <ErrorNotice error={settings.error} /> : settings.data && <Secrets settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
       {settings.data && <ConfigEditor settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
     </>
+  );
+}
+
+/**
+ * Listening: OpenMagpie (ListeningKit's self-hostable listener) delivers the
+ * posts its watches match to cold's webhook, and each watch becomes a
+ * prospect list whose trigger line is the post.
+ */
+function ListenCard() {
+  const listen = useApi<ListenStatusResponse>("/api/listen");
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function save(watch: string) {
+    setBusy(watch);
+    try {
+      toast.success((await api<ActionResponse>("/api/listen/export", { method: "POST", body: { watch } })).message);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copy(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`Copied the ${what}.`);
+    } catch {
+      toast.error("The browser blocked the clipboard: select it and copy it.");
+    }
+  }
+
+  const d = listen.data;
+  return (
+    <Card title="Listening" icon={Ear}>
+      {listen.loading && !d ? (
+        <Loading />
+      ) : listen.error ? (
+        <ErrorNotice error={listen.error} />
+      ) : (
+        d && (
+          <div className="stack">
+            <p className="hint">
+              Posts where someone asks for what you sell, found by OpenMagpie's watches, come in here as prospects. Each watch is a prospect list whose trigger line is the post itself. Save a watch as a list to fill in what's missing (company, email) and research it.
+            </p>
+            <Check ok={d.configured}>{d.configured ? "COLD_LISTEN_SECRET is set" : "Set COLD_LISTEN_SECRET below: any long random string"}</Check>
+            {!d.available && <Notice tone="amber">This server has no database to keep matches.</Notice>}
+            <div className="stack" style={{ gap: 4 }}>
+              <span className="hint">In OpenMagpie, give the watch a webhook action that POSTs here, with the header Authorization: Bearer and your COLD_LISTEN_SECRET:</span>
+              <div className="row wrap">
+                <code className="truncate">{d.webhookUrl}</code>
+                <Button size="sm" icon={Copy} onClick={() => copy(d.webhookUrl, "webhook URL")}>
+                  Copy
+                </Button>
+              </div>
+            </div>
+            {d.watches.length === 0 ? (
+              <span className="text-3">No matches have come in yet.</span>
+            ) : (
+              d.watches.map((w) => (
+                <div key={w.id} className="row between wrap">
+                  <span>
+                    <b>{w.name}</b> <span className="text-3">{w.count} {w.count === 1 ? "match" : "matches"}, latest {ago(w.latest)}</span>
+                  </span>
+                  <Button size="sm" icon={ListPlus} loading={busy === w.id} onClick={() => save(w.id)}>
+                    Save as a list
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        )
+      )}
+    </Card>
   );
 }
 

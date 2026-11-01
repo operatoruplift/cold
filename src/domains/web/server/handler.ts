@@ -161,8 +161,13 @@ export interface HandlerDeps {
   limiter?: (limit: number, windowMs: number) => Limiter;
   /** What Vercel's cron job runs every minute (the next emails of a send), behind CRON_SECRET. */
   cron?: () => Promise<void>;
-  /** Where X sends the owner back after Connect X. Trusted through its one-time state, not the session cookie (a strict cookie doesn't come back from x.com). */
-  xCallback?: (url: URL) => Promise<Response>;
+  /**
+   * Routes outside the login, by "METHOD /path", each trusted through its own
+   * check instead of the session cookie: X's Connect X callback (its one-time
+   * state; a strict cookie doesn't come back from x.com) and the listening
+   * webhook (its shared secret).
+   */
+  publicRoutes?: Record<string, (request: Request, url: URL) => Promise<Response>>;
   now?: () => Date;
 }
 
@@ -237,13 +242,12 @@ export function createHandler(deps: HandlerDeps): (request: Request) => Promise<
     const route = `${request.method} ${url.pathname}`;
     const ip = deps.clientIp(request);
     const token = parseCookies(request.headers.get("cookie"))[SESSION_COOKIE];
+    const open = deps.publicRoutes?.[route];
+    if (open) return open(request, url);
 
     switch (route) {
       case "GET /api/health":
         return json({ ok: true, version });
-      case "GET /api/x/callback":
-        if (!deps.xCallback) throw new HttpError(404, "X is not set up on this server.");
-        return deps.xCallback(url);
       case "GET /api/cron/tick": {
         const secret = process.env.CRON_SECRET;
         if (!deps.cron || !secret || request.headers.get("authorization") !== `Bearer ${secret}`) throw new HttpError(401, "Not for you.");

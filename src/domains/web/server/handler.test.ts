@@ -36,6 +36,7 @@ beforeEach(async () => {
       privateCalls.push(new URL(request.url).pathname);
       return Response.json({ private: true });
     },
+    publicRoutes: { "POST /api/listen/magpie": async (request) => Response.json({ open: true, auth: request.headers.get("authorization") }) },
     clientIp: () => "127.0.0.1",
   });
 });
@@ -77,6 +78,14 @@ describe("the public side", () => {
     expect(response.status).toBe(401);
     expect(privateCalls).toEqual([]);
     expect((await call("GET", "/api/waitlist")).status).toBe(401);
+  });
+
+  test("a route another service calls answers without a session or the app's header, and checks its own proof", async () => {
+    const response = await call("POST", "/api/listen/magpie", { items: [] }, { "x-cold": "", authorization: "Bearer s3cret" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ open: true, auth: "Bearer s3cret" });
+    expect(privateCalls).toEqual([]);
+    expect((await call("GET", "/api/listen/magpie", undefined, { "x-cold": "" })).status).toBe(403);
   });
 });
 

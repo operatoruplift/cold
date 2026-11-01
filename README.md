@@ -59,6 +59,12 @@ call scripts and the Do Not Contact list.
   web search, and every claim comes with the page it was read on. Drafts,
   call prep and reply answers wait for your approval; nothing goes out on its
   own.
+- **Leads from listening.** Point a watch in
+  [OpenMagpie](https://github.com/obris-dev/openmagpie) (the self-hostable
+  listener behind ListeningKit) at COLD's webhook, and every post where
+  someone asks for what you sell comes in as a prospect whose trigger line is
+  the post itself, with its link. A post on X can be answered with an X DM;
+  save a watch as a list to fill in the rest (company, email) and research it.
 - **The messages are the product.** 45 messages across cold email, LinkedIn,
   X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message

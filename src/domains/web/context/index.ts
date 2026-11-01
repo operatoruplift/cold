@@ -10,6 +10,7 @@ import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects"
 import { DbFiles, DiskFiles, EnvFileSecrets, secretKey, type Files, type Secrets } from "../../storage";
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
 import { xAppFromEnv, XClient, XStore, type XFetch } from "../../xApi";
+import { LISTEN_PREFIX, ListenStore, listenProspect } from "../../listen";
 import { CampaignStore } from "../campaigns";
 import { processScoreItem } from "../decide/engine";
 import { ScoreJobs } from "../decide/jobs";
@@ -79,6 +80,8 @@ export class WebContext {
   readonly scoring?: ScoreJobs;
   /** X connections, sign-ins and sends through X's API; only with the database. */
   readonly x?: XStore;
+  /** Listening matches OpenMagpie delivered; only with the database. */
+  readonly listening?: ListenStore;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -104,6 +107,7 @@ export class WebContext {
         random: options.random,
       });
       this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
+      this.listening = new ListenStore(options.db);
     }
   }
 
@@ -274,6 +278,11 @@ export class WebContext {
     if (source.startsWith("csv:")) {
       if (where) throw new Error("A Twenty filter only applies to a Twenty source.");
       prospects = prospectsFromCsv((await this.csv(source)).text);
+    } else if (source.startsWith(LISTEN_PREFIX)) {
+      if (where) throw new Error("A Twenty filter only applies to a Twenty source.");
+      if (!this.listening) throw new Error("Listening needs the app's database.");
+      const watch = source.slice(LISTEN_PREFIX.length);
+      prospects = (await this.listening.items({ watch: watch === "all" ? undefined : watch, limit: 2000 })).map(listenProspect);
     } else {
       prospects = await loadProspects(source, { where: where || undefined, client: twentyClient() });
     }

@@ -25,7 +25,7 @@ import { prepareDmRun } from "../../dm";
 import { prepareEmailRun } from "../../email";
 import { findSequence } from "../../messages";
 import { buildVariables, renderForProspect } from "../../outreach";
-import { parseCsv, type Prospect } from "../../prospects";
+import { csvText, parseCsv, type Prospect } from "../../prospects";
 import { twentyClient } from "../../touches";
 import { HttpError, json, readBody, type Route } from "../api";
 import { OWN_LIST, type WebContext } from "../context";
@@ -33,15 +33,6 @@ import { chooseStyle, draftStyle, evidenceFor } from "../decide/engine";
 import { offerOf, prospectOf, senderOf, SOURCE, startRun } from "./shared";
 
 export { offerOf, prospectOf, senderOf, SOURCE, startRun } from "./shared";
-
-/** A CSV cell: quoted when it needs to be, and never read as a formula. */
-function cell(value: string | undefined): string {
-  let s = value ?? "";
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-const csvText = (headers: string[], rows: Array<Record<string, string | undefined>>) =>
-  [headers.map(cell).join(","), ...rows.map((r) => headers.map((h) => cell(r[h])).join(","))].join("\n") + "\n";
 
 /** Only http(s) links from research reach the page. */
 const httpOnly = (urls: string[] | undefined) => (urls ?? []).filter((u) => /^https?:\/\//i.test(u));

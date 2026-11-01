@@ -1,6 +1,6 @@
 import { explainError, type AiOffer, type AiProspect, type AiProvider, type AiResult, type AiRunKind, type AiSender, type AiStore } from "../../ai";
 import type { Account, Offer } from "../../config";
-import type { Prospect } from "../../prospects";
+import { PROSPECT_SOURCE, type Prospect } from "../../prospects";
 import { keepAlive } from "../background";
 
 export const offerOf = (offer?: Offer): AiOffer => ({
@@ -18,8 +18,8 @@ export const senderOf = (account: Account): AiSender & { phone?: string } => ({
 });
 export const prospectOf = (p: Prospect): AiProspect => ({ name: p.label, ...p.variables });
 
-/** The prospect sources the API accepts, as in the main API. */
-export const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
+/** The prospect sources the API accepts, the same as the main API's. */
+export const SOURCE = PROSPECT_SOURCE;
 
 /** One AI run, ready to go: what it is about, whose API it uses, and the work. */
 export interface PreparedRun<T> {

@@ -97,7 +97,18 @@ export interface PreviewResponse {
 export interface SourceOption {
   id: string;
   label: string;
-  kind: "csv" | "twenty";
+  kind: "csv" | "twenty" | "listen";
+}
+
+/** Settings, Listening: OpenMagpie's webhook target and the watches that have delivered. */
+export interface ListenStatusResponse {
+  /** COLD_LISTEN_SECRET is set. */
+  configured: boolean;
+  /** The app's database is there to keep matches. */
+  available: boolean;
+  /** Point OpenMagpie's webhook action here, with Authorization: Bearer <COLD_LISTEN_SECRET>. */
+  webhookUrl: string;
+  watches: Array<{ id: string; name: string; count: number; latest: string }>;
 }
 
 export interface ProspectSummary {

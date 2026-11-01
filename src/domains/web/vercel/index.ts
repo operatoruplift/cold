@@ -11,7 +11,9 @@ import { invocationDeadline } from "../background";
 import { WebContext } from "../context";
 import { clientAddress, createHandler, DbSetupCode } from "../server/handler";
 import { serverSettings } from "../server/settings";
-import { xCallback, xRoutes } from "../x";
+import { listenRoutes } from "../listen";
+import { publicRoutes } from "../open";
+import { xRoutes } from "../x";
 
 /** Things that only need doing now and then: expired rate-limit windows and sessions. */
 async function tidy(db: Db): Promise<void> {
@@ -44,11 +46,11 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
     version: (process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "dev").slice(0, 12),
     auth,
     waitlist: new Waitlist(db),
-    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx)]),
+    privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx)]),
     setup,
     // Vercel sets X-Forwarded-For to the visitor's address itself.
     clientIp: clientAddress(settings.proxyHops, () => undefined),
-    xCallback: xCallback(ctx),
+    publicRoutes: publicRoutes(ctx),
     limiter: (limit, windowMs) => new DbRateLimiter(db, limit, windowMs),
     cron: async () => {
       await ctx.freshen();

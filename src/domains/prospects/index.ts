@@ -7,7 +7,10 @@ import type { Prospect } from "./types";
 export * from "./types";
 export * from "./helpers";
 
-export const SOURCES_HELP = "csv:<file>, twenty:people, twenty:agencyProspects or twenty:agencyPeople";
+export const SOURCES_HELP = "csv:<file>, twenty:people, twenty:agencyProspects, twenty:agencyPeople or twenty:agencyLeads";
+
+/** Every prospect source the app accepts: a CSV, a Twenty object, or a listening watch (listen:<watch id> or listen:all). */
+export const PROSPECT_SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople|agencyLeads)|listen:[\w-]+)$/;
 
 export interface LoadOptions {
   /** A Twenty REST filter, e.g. coldCallStatus[eq]:NEW */

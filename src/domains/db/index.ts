@@ -278,6 +278,18 @@ const MIGRATIONS: string[] = [
      created_at TEXT NOT NULL,
      PRIMARY KEY (account, prospect_key, sequence, step)
    );`,
+  // Listening: the matches OpenMagpie's webhook delivers, each key once.
+  `CREATE TABLE listen_items (
+     key TEXT PRIMARY KEY,
+     watch_id TEXT NOT NULL,
+     watch_name TEXT NOT NULL,
+     source_kind TEXT NOT NULL,
+     occurred_at TEXT NOT NULL,
+     received_at TEXT NOT NULL,
+     item TEXT NOT NULL
+   );
+   CREATE INDEX listen_items_watch ON listen_items (watch_id, occurred_at);
+   CREATE INDEX listen_items_newest ON listen_items (occurred_at);`,
 ];
 
 const statements = (script: string): Statement[] =>

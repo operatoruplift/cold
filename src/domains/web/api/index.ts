@@ -9,7 +9,7 @@ import { dmChecklist, prepareDmRun, recordDmOutcome, type DmOutcome } from "../.
 import { describeWindow, prepareEmailRun, smtpTransport, syncReplies, testImap, toSendPlan, type EmailOverride } from "../../email";
 import { findMessage, findSequence, lintMessage, lintSequences, toMessage, toSequences, type Library, type Message } from "../../messages";
 import { buildVariables, renderForProspect } from "../../outreach";
-import { findProspect, parseCsv, type Prospect } from "../../prospects";
+import { findProspect, parseCsv, PROSPECT_SOURCE, type Prospect } from "../../prospects";
 import { renderTemplate, VARIABLES } from "../../render";
 import { summarize } from "../../stats";
 import { TOUCH_KINDS, twentyClient, type Touch } from "../../touches";
@@ -48,7 +48,7 @@ export class HttpError extends Error {
 
 export const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
 const MESSAGE_ID = /^(email|dm)\/(personal|company)\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d+-[a-z0-9]+(?:-[a-z0-9]+)*$|^call\/(personal|company)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const SOURCE = /^(csv:.+\.csv|twenty:(people|agencyProspects|agencyPeople))$/;
+const SOURCE = PROSPECT_SOURCE;
 const ANSI = /\x1b\[[0-9;]*m/g;
 
 export async function readBody<T>(request: Request): Promise<T> {
@@ -113,6 +113,7 @@ function envFields(config: ColdConfig | undefined): SettingsResponse["env"] {
   fields.set("REACHER_SECRET", "Optional: Reacher's header secret");
   fields.set("X_CLIENT_ID", "Optional: your X developer app's OAuth 2.0 Client ID, so X DMs go out from cold through X's API (developer.x.com). Then Connect X below");
   fields.set("X_CLIENT_SECRET", "Optional: that app's OAuth 2.0 Client Secret (a Web App; leave it empty for a Native App)");
+  fields.set("COLD_LISTEN_SECRET", "Optional: a long random string. OpenMagpie's webhook action sends it as Authorization: Bearer <it>, so its matches come in as prospects");
   return [...fields.entries()].map(([name, hint]) => ({ name, set: !!process.env[name]?.trim(), hint }));
 }
 
@@ -401,6 +402,9 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
           sources.push({ id: "twenty:agencyProspects", label: "Twenty: dialer prospects (businesses)", kind: "twenty" });
           sources.push({ id: "twenty:agencyPeople", label: "Twenty: people at dialer prospects", kind: "twenty" });
         }
+        const watches = (await ctx.listening?.watches()) ?? [];
+        if (watches.length > 1) sources.push({ id: "listen:all", label: `Listening: every watch (${watches.reduce((n, w) => n + w.count, 0)} matches)`, kind: "listen" });
+        for (const w of watches) sources.push({ id: `listen:${w.id}`, label: `Listening: ${w.name} (${w.count} ${w.count === 1 ? "match" : "matches"})`, kind: "listen" });
         return json(sources);
       },
     ],

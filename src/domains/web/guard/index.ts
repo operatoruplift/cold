@@ -15,18 +15,20 @@ export interface Access {
  * - An Origin, when the browser sends one, must be this server's.
  *
  * /api/health is open to anyone, for a host's uptime checks; /api/cron/
- * carries its own secret instead (Vercel's cron calls it). /api/x/callback is
- * where X sends the owner back after Connect X: a plain page load, so no
- * header, answered on this server's own hosts only and trusted only through
- * its one-time state.
+ * carries its own secret instead (Vercel's cron calls it). The routes in
+ * OPEN_ROUTES are called by other services, not the app, so they carry no
+ * header: they are answered on this server's own hosts only, and each checks
+ * its own proof (Connect X's one-time state, the listening webhook's secret).
  */
+export const OPEN_ROUTES: ReadonlySet<string> = new Set(["GET /api/x/callback", "POST /api/listen/magpie"]);
+
 export function refuseRequest(request: Request, access: Access): string | undefined {
   const { pathname } = new URL(request.url);
   if (pathname === "/api/health" || pathname.startsWith("/api/cron/")) return undefined;
   const host = request.headers.get("host") ?? "";
   if (!access.hosts.includes(host)) return `cold does not answer on ${host || "this address"}`;
   if (!pathname.startsWith("/api/")) return undefined;
-  if (pathname === "/api/x/callback" && request.method === "GET") return undefined;
+  if (OPEN_ROUTES.has(`${request.method} ${pathname}`)) return undefined;
   if (request.headers.get("x-cold") !== "1") return "missing the x-cold header";
   const origin = request.headers.get("origin");
   if (origin && !access.origins.includes(origin)) return "cross-origin requests are not allowed";
