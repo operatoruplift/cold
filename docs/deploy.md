@@ -84,29 +84,33 @@ Signs: after a deploy, the logs show a new setup code, the login you made is
 gone, and the `Database …` line at start shows a new fingerprint. Each
 deployment is getting its own database from the Turso connection. Older
 deployments keep their own, so nothing is lost, but the live site no longer
-sees it. Two ways to fix it:
+sees it. Turso's documentation names no setting for this, so pin COLD to one
+database:
 
-- **Turn it off.** In Vercel, **Storage**, open the Turso database. If its
-  settings for this project offer a database (or branch) for each
-  deployment, turn that off, at least for Production, and redeploy.
-- **Pin COLD to one database.** COLD uses `COLD_DATABASE_URL` and
-  `COLD_DATABASE_TOKEN` before the integration's variables. In Turso (from
-  the database's page in Vercel, **Open in Turso**), copy the database's
-  address (`libsql://…`) and create a token for it, or with the Turso CLI:
+1. In Vercel, **Storage**, open the Turso database and choose **Open in
+   Turso** (or run `vercel integration open tursocloud`).
+2. Open the database you want to keep (the first one, made when you added
+   the integration), copy its address (`libsql://…`) and create a token for
+   it. With the Turso CLI instead:
 
-  ```bash
-  turso db show <database> --url
-  ```
+   ```bash
+   turso db show <database> --url
+   ```
 
-  ```bash
-  turso db tokens create <database>
-  ```
+   ```bash
+   turso db tokens create <database>
+   ```
 
-  Add both in the project's **Settings, Environment Variables**, as
-  Sensitive, for Production. Previews can keep the integration's own
-  databases, so they never touch your real data. Redeploy: the line at start
-  now says `(from COLD_DATABASE_URL)`, and its fingerprint stays the same
-  from one deploy to the next.
+3. In the Vercel project (the one that serves COLD), **Settings,
+   Environment Variables**: add `COLD_DATABASE_URL` and
+   `COLD_DATABASE_TOKEN`, as Sensitive, for Production. COLD uses them before
+   the integration's variables. Previews can keep the integration's own
+   databases, so they never touch your real data.
+4. Redeploy. The line at start now says `(from COLD_DATABASE_URL)`, and its
+   fingerprint stays the same from one deploy to the next.
+
+If the database's settings in Vercel ever offer a database (or branch) for
+each deployment, turning that off for Production works too.
 
 ## With the Dockerfile
 
