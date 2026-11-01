@@ -6,6 +6,7 @@ import { openDatabase } from "../../db";
 import { TwentyClient } from "../../twenty";
 import { createApi } from "../api";
 import { WebContext } from "../context";
+import type { CallSheet } from "../../call";
 import type { ActionResponse, LeadAlertsResponse, LeadsResponse, SourceOption } from "../types";
 import { leadRoutes } from ".";
 
@@ -94,6 +95,20 @@ describe("lead routes", () => {
       ["dq", false, undefined],
     ]);
     expect(data.leads[0]).toMatchObject({ prospectKey: "agencyLeads:sam", phone: "512 555 0147", answers: ["Cars a week: 10-20"] });
+  });
+
+  test("each lead says whether it is a time to call them", async () => {
+    const { data } = await call<LeadsResponse>("GET", "/api/leads");
+    expect(data.leads[0]!.callTime).toMatchObject({ ok: true, local: "12:00 PM CST", zones: ["America/Chicago"], from: ["phone"] });
+  });
+
+  test("a call sheet for a lead is filled in for them, with their time", async () => {
+    const sheet = await call<CallSheet>("GET", `/api/calls/sheet?${new URLSearchParams({ id: "call/personal/founder-direct", source: "twenty:agencyLeads", prospect: "agencyLeads:sam" })}`);
+    expect(sheet.status).toBe(200);
+    expect(sheet.data.sections[0]!.text).toStartWith("Hi Sam,");
+    expect(sheet.data.callTime?.note).toBe("12:00 PM CST their time (from their phone number).");
+    const plain = await call<CallSheet>("GET", "/api/calls/sheet?id=call/personal/founder-direct");
+    expect(plain.data.callTime).toBeUndefined();
   });
 
   test("the leads are a prospect source, so a call script fills in for one", async () => {

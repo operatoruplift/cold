@@ -33,6 +33,7 @@ export function leadRoutes(ctx: WebContext): Route[] {
           response.leads = await recentLeads(client, {
             now: ctx.now(),
             days,
+            hours: (await ctx.config()).config?.calls,
             // Called or not, from the touch log; a log that can't be opened only leaves that out.
             calls: async (since) => {
               try {

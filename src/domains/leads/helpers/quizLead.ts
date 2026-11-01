@@ -1,11 +1,13 @@
+import { callTime } from "../../callHours";
+import type { CallHours } from "../../config";
 import { leadNote, type Prospect } from "../../prospects";
 import type { Touch } from "../../touches";
 import type { NtfyMessage, QuizLead } from "../types";
 
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
-/** One quiz lead for the Calls page: its record in Twenty, as a prospect, and when it was last called. Pure. */
-export function quizLead(record: Record<string, unknown>, prospect: Prospect, calledAt?: string): QuizLead {
+/** One quiz lead for the Calls page: its record in Twenty, as a prospect, when it was last called, and whether it can be called now. Pure. */
+export function quizLead(record: Record<string, unknown>, prospect: Prospect, calledAt?: string, clock?: { hours: CallHours; now: Date }): QuizLead {
   const v = prospect.variables;
   const qualification = (text(record.qualificationStatus) ?? "").toUpperCase();
   const status = (text(record.status) ?? "").toUpperCase();
@@ -23,6 +25,7 @@ export function quizLead(record: Record<string, unknown>, prospect: Prospect, ca
     from: v.utm_source ?? v.lead_source,
     calledAt,
     doNotContact: prospect.doNotContact,
+    callTime: clock ? callTime(prospect, clock.hours, clock.now) : undefined,
   };
 }
 
@@ -35,23 +38,22 @@ export function lastCall(prospect: Prospect, calls: Touch[]): string | undefined
 }
 
 /**
- * Who to call first: qualified leads nobody has called yet, newest first;
+ * Who to call first: qualified leads nobody has called yet that can be
+ * called now, newest first; then the ones it's too early or late to call;
  * then the ones already called; then the disqualified; Do Not Contact last.
  * Pure.
  */
 export function rankLeads(leads: QuizLead[]): QuizLead[] {
-  const group = (l: QuizLead) => (l.doNotContact ? 3 : !l.qualified ? 2 : l.calledAt ? 1 : 0);
+  const group = (l: QuizLead) => (l.doNotContact ? 4 : !l.qualified ? 3 : l.calledAt ? 2 : l.callTime?.ok === false ? 1 : 0);
   return [...leads].sort((a, b) => group(a) - group(b) || (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
 
 /** The push for one new lead: who, their company, the number to call, the first answers. Tapping it opens the lead on the Calls page. Pure. */
 export function leadPush(lead: QuizLead, appUrl?: string): Omit<NtfyMessage, "topic"> {
   const who = lead.name ?? lead.label;
-  const lines = [
-    lead.company && lead.company !== who ? lead.company : undefined,
-    lead.phone ? `Call ${lead.phone}` : lead.email ? `No phone given: ${lead.email}` : undefined,
-    ...lead.answers.slice(0, 4),
-  ].filter((l): l is string => !!l);
+  const time = lead.callTime;
+  const call = !lead.phone ? undefined : time?.ok === false ? `Not yet: ${time.note}\nTheir number: ${lead.phone}` : time?.ok ? `Call ${lead.phone}: ${time.local} their time` : `Call ${lead.phone}`;
+  const lines = [lead.company && lead.company !== who ? lead.company : undefined, call ?? (lead.email ? `No phone given: ${lead.email}` : undefined), ...lead.answers.slice(0, 4)].filter((l): l is string => !!l);
   return {
     title: `New quiz lead: ${who}`.slice(0, 120),
     message: (lines.join("\n") || "They took your quiz.").slice(0, 1000),

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { AiError, AiStore, aiConfigured, claudeCall, type MessagesCall } from "../../ai";
-import { APP_ROOT, configFromText, type Account, type ColdConfig, type DecideSettings } from "../../config";
+import { APP_ROOT, configFromText, DEFAULT_CALL_HOURS, type Account, type ColdConfig, type DecideSettings } from "../../config";
 import type { Db } from "../../db";
 import { claudeDecider, DecideStore, jevConfigured, jevProvider, subqConfigured, subqReader, type CollectOptions, type DecisionProvider, type LongReader } from "../../decide";
 import { reacherFromEnv, smtpTransport, type MailTransport } from "../../email";
@@ -118,7 +118,7 @@ export class WebContext {
       });
       this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
       this.listening = new ListenStore(options.db);
-      this.leads = new LeadWatch({ db: options.db, client: () => this.twenty(), appUrl: options.appUrl, fetch: options.ntfyFetch, now: () => this.now() });
+      this.leads = new LeadWatch({ db: options.db, client: () => this.twenty(), appUrl: options.appUrl, hours: async () => (await this.config()).config?.calls ?? DEFAULT_CALL_HOURS, fetch: options.ntfyFetch, now: () => this.now() });
     }
   }
 

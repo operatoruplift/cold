@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { DEFAULT_CALL_HOURS } from "../config";
 import { openDatabase, type Db } from "../db";
 import { fromAgencyLead } from "../prospects";
 import type { Touch } from "../touches";
@@ -92,15 +93,16 @@ describe("quiz leads", () => {
     expect(lastCall(prospect, [{ ...call("agencyLeads:lead-1", "2026-11-01T17:00:00Z"), channel: "EMAIL", kind: "SENT" }])).toBeUndefined();
   });
 
-  test("who to call first: uncalled qualified leads, newest first, then called, disqualified, Do Not Contact", () => {
+  test("who to call first: uncalled qualified leads, newest first, then the ones it's too late to call, called, disqualified, Do Not Contact", () => {
     const order = rankLeads([
+      lead({ id: "asleep", createdAt: "2026-11-01T21:00:00Z", callTime: { ok: false, zones: ["Pacific/Honolulu"], from: ["phone"], note: "" } }),
       lead({ id: "dnc", doNotContact: true, createdAt: "2026-11-01T20:00:00Z" }),
       lead({ id: "dq", qualified: false, createdAt: "2026-11-01T19:00:00Z" }),
       lead({ id: "called", calledAt: "2026-11-01T18:30:00Z", createdAt: "2026-11-01T18:00:00Z" }),
       lead({ id: "older", createdAt: "2026-11-01T10:00:00Z" }),
       lead({ id: "newer", createdAt: "2026-11-01T12:00:00Z" }),
     ]).map((l) => l.id);
-    expect(order).toEqual(["newer", "older", "called", "dq", "dnc"]);
+    expect(order).toEqual(["newer", "older", "asleep", "called", "dq", "dnc"]);
   });
 
   test("a push names the lead, the company, the number, their first answers, and opens the lead", () => {
@@ -111,6 +113,15 @@ describe("quiz leads", () => {
     expect(push.priority).toBe(4);
     expect(leadPush(lead({ phone: undefined, email: "sam@example.com", answers: [] })).message).toBe("No phone given: sam@example.com");
     expect(leadPush(lead({ phone: undefined, answers: [] })).message).toBe("They took your quiz.");
+  });
+
+  test("a push says whether they can be called now, in their own time", () => {
+    const record = { id: "lead-1", contactName: "Sam Lee", note: note("Sam Lee"), createdAt: "2026-11-03T03:58:00.000Z" };
+    const at = (iso: string) => leadPush(quizLead(record, fromAgencyLead(record), undefined, { hours: DEFAULT_CALL_HOURS, now: new Date(iso) })).message;
+    expect(at("2026-11-02T15:00:00Z")).toBe("Call 512 555 0147: 9:00 AM CST their time\nCars a week: 10-20");
+    expect(at("2026-11-03T04:00:00Z")).toBe(
+      "Not yet: 10:00 PM CST their time, outside calling hours: call from tomorrow 8:00 AM CST (from their phone number).\nTheir number: 512 555 0147\nCars a week: 10-20",
+    );
   });
 
   test("many leads at once come as one push", () => {

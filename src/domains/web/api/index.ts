@@ -623,7 +623,7 @@ export function createApi(ctx: WebContext, extraRoutes: Route[] = []): (request:
         const source = url.searchParams.get("source");
         const prospectKey = url.searchParams.get("prospect");
         const prospect = source && prospectKey ? findProspect(await ctx.prospects(source), prospectKey) : undefined;
-        return json(callSheetData(script, library, account, offer, prospect));
+        return json(callSheetData(script, library, account, offer, prospect, { hours: config.calls, now: ctx.now() }));
       },
     ],
     [

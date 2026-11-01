@@ -1,3 +1,5 @@
+import type { CallTime } from "../callHours";
+
 /** Where new-lead alerts go: a topic on ntfy.sh or on your own ntfy server. */
 export interface NtfyTarget {
   /** The server's root, where messages are published as JSON: "https://ntfy.sh/". */
@@ -41,6 +43,8 @@ export interface QuizLead {
   /** When they were last called, from the touch log. */
   calledAt?: string;
   doNotContact: boolean;
+  /** Whether they can be called now, in their own time. */
+  callTime?: CallTime;
 }
 
 /** What one look for new leads did. */

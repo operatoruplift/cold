@@ -75,7 +75,13 @@ within 5 business days.
   against the Do Not Call Register. Canada: keep your own do-not-call list even
   for B2B calls.
 - **Call at reasonable hours** in the prospect's time zone. The US rule is 8am
-  to 9pm; other countries set their own.
+  to 9pm; other countries set their own. COLD shows each prospect's local time
+  on the call sheet (app and `cold call sheet`) and holds a quiz lead's Call
+  button outside the hours in cold.yaml's `calls:` (8am to 9pm by default). It
+  reads the time zone from a `timezone` column first, else from both the
+  phone's area code and the state or province, and calls only when it is
+  inside the hours everywhere they may be. A number it can't place says so:
+  check where they are before you dial.
 - **Say who you are and why you're calling,** and give a number they can reach
   you on (`{{sender_phone}}` in the voicemail scripts).
 - **Keep an internal do-not-call list.** That is the dialer's Do Not Contact

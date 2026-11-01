@@ -45,7 +45,8 @@
     "test": "bun test",
     "check": "bun run typecheck && bun run test && bun run lint:messages",
     "twenty:schema": "bun src/cli.ts twenty:schema",
-    "twenty:schema:check": "bun src/cli.ts twenty:schema --dry-run"
+    "twenty:schema:check": "bun src/cli.ts twenty:schema --dry-run",
+    "data:phoneZones": "bun src/domains/callHours/build.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",

@@ -338,7 +338,7 @@ async function call(sub: string | undefined, id: string | undefined): Promise<nu
       prospect = flags.prospect ? findProspect(all, flags.prospect) : undefined;
       if (flags.prospect && !prospect) throw new UsageError(`No prospect matching "${flags.prospect}"`);
     }
-    io.log(callSheet(script, lib, account, getOffer(config, flags.offer), prospect));
+    io.log(callSheet(script, lib, account, getOffer(config, flags.offer), prospect, { hours: config.calls, now: new Date() }));
     return 0;
   }
   throw new UsageError("cold call sync | sheet <script>");

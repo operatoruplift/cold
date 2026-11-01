@@ -1,4 +1,4 @@
-import { ListChecks, Phone, PhoneCall, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { Clock, ListChecks, Phone, PhoneCall, PhoneOff, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CallPrep } from "../../domains/ai/tasks";
 import type { CallSheet } from "../../domains/call";
@@ -57,6 +57,7 @@ export function CallsPage() {
                   {l.phone ?? "No phone"}
                   {l.createdAt ? `, took the quiz ${ago(l.createdAt)}` : ""}
                 </div>
+                {l.callTime?.ok === false && <div className="s text-amber">Not now: {l.callTime.local} there</div>}
               </button>
             ))}
             {due.length > 8 && <div className="hint" style={{ padding: "4px 16px 8px" }}>{due.length - 8} more waiting</div>}
@@ -115,6 +116,11 @@ export function CallsPage() {
             </div>
             <ErrorNotice error={sheet.error} />
             {sheet.data && sheet.data.missing.length > 0 && <Notice tone="amber">This prospect has no {sheet.data.missing.map((m) => `{{${m}}}`).join(", ")}: those parts are left in braces.</Notice>}
+            {sheet.data?.callTime && (
+              <Notice tone={sheet.data.callTime.ok === false ? "amber" : sheet.data.callTime.ok ? "green" : "blue"} title={sheet.data.callTime.ok === false ? "Not a time to call them" : sheet.data.callTime.ok ? "A good time to call" : undefined}>
+                {sheet.data.callTime.note}
+              </Notice>
+            )}
             {sheet.data && (
               <div className="card" style={{ marginTop: 12 }}>
                 <Tabs
@@ -180,10 +186,21 @@ function LeadCard({ lead, onClose }: { lead: QuizLead; onClose: () => void }) {
           {lead.email ? `. ${lead.email}` : ""}
         </span>
         {lead.phone && !lead.doNotContact && (
-          <div className="row">
-            <a className="btn primary sm" href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`}>
-              <PhoneCall size={14} /> Call {lead.phone}
-            </a>
+          <div className="row wrap">
+            {lead.callTime?.ok === false ? (
+              <Button size="sm" icon={PhoneOff} disabled>
+                Not now: {lead.callTime.local} there
+              </Button>
+            ) : (
+              <a className="btn primary sm" href={`tel:${lead.phone.replace(/[^\d+]/g, "")}`}>
+                <PhoneCall size={14} /> Call {lead.phone}
+              </a>
+            )}
+            {lead.callTime?.ok && (
+              <span className="hint row" style={{ gap: 4 }}>
+                <Clock size={13} /> {lead.callTime.local} there
+              </span>
+            )}
           </div>
         )}
         {lead.answers.length > 0 && (

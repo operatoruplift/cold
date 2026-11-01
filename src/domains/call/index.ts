@@ -1,4 +1,5 @@
-import type { Account, Offer } from "../config";
+import { callTime, type CallTime } from "../callHours";
+import type { Account, CallHours, Offer } from "../config";
 import { bold, dim, green, indent, type Io } from "../cli/io";
 import type { Library, Message } from "../messages";
 import { buildVariables } from "../outreach";
@@ -68,6 +69,8 @@ export interface CallSheet {
   objections: Array<{ objection: string; category: string; response: string }>;
   /** Variables with no value, when filled for a prospect. */
   missing: string[];
+  /** Whether the prospect can be called now, in their own time. */
+  callTime?: CallTime;
 }
 
 /**
@@ -75,7 +78,7 @@ export interface CallSheet {
  * every objection with its answer in the script's voice. Filled in for a
  * prospect when one is given; otherwise prospect details stay as {{name}}.
  */
-export function callSheetData(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect): CallSheet {
+export function callSheetData(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect, clock?: { hours: CallHours; now: Date }): CallSheet {
   const variables = buildVariables(account, offer, prospect);
   const mode = prospect ? "strict" : "partial";
   const missing = new Set<string>();
@@ -100,6 +103,7 @@ export function callSheetData(script: Message, library: Library, account: Accoun
     sections,
     objections: library.objections.map((o) => ({ objection: o.objection, category: o.category, response: fill(o[script.voice], o.objection) })),
     missing: [...missing],
+    callTime: prospect && clock ? callTime(prospect, clock.hours, clock.now) : undefined,
   };
 }
 
@@ -107,9 +111,10 @@ export function callSheetData(script: Message, library: Library, account: Accoun
  * One call script as a sheet to read from: the script, then every objection
  * with its answer, filled in for a prospect when one is given.
  */
-export function callSheet(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect): string {
-  const sheet = callSheetData(script, library, account, offer, prospect);
+export function callSheet(script: Message, library: Library, account: Account, offer: Offer | undefined, prospect?: Prospect, clock?: { hours: CallHours; now: Date }): string {
+  const sheet = callSheetData(script, library, account, offer, prospect, clock);
   const lines = [bold(`${sheet.title}${prospect ? ` - ${prospect.label}` : ""}`), dim(`${sheet.category} | ${sheet.voice} voice | ${sheet.when ?? ""}`), ""];
+  if (sheet.callTime) lines.splice(2, 0, sheet.callTime.ok === false ? bold(`Not now: ${sheet.callTime.note}`) : sheet.callTime.ok ? `Good time to call: ${sheet.callTime.note}` : sheet.callTime.note);
   for (const section of sheet.sections) lines.push(section.heading.toUpperCase(), section.text, "");
   lines.push(bold("OBJECTIONS"));
   for (const o of sheet.objections) lines.push("", `"${o.objection}"`, indent(o.response, "  "));

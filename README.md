@@ -65,6 +65,10 @@ call scripts and the Do Not Contact list.
   someone asks for what you sell comes in as a prospect whose trigger line is
   the post itself, with its link. A post on X can be answered with an X DM;
   save a watch as a list to fill in the rest (company, email) and research it.
+- **Calls at their hour.** Every call sheet says what time it is for the
+  prospect, from their phone's area code or their state, and when calling
+  hours open if they are closed (8am to 9pm by default, `calls:` in
+  cold.yaml). Areas that span zones are called when every zone is awake.
 - **Quiz leads get called first.** Leads from your
   [offer](https://github.com/matthewdonsemail-lab/offer) quiz funnel are a
   prospect source (`twenty:agencyLeads`) with their answers as variables,

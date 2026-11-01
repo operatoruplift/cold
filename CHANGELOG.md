@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Calls at their hour.** A call sheet for a prospect, in the app and from
+  `cold call sheet`, says what time it is where they are and whether it is
+  inside calling hours: 8am to 9pm every day unless cold.yaml's new `calls:`
+  says otherwise (`start`, `end`, `days`). Outside them it says when hours
+  open ("call from tomorrow 8:00 AM CST"). The time zone comes from a
+  `timezone` column, else from both their phone's area code (from Google's
+  libphonenumber, down to the exchange where an area code is split) and
+  their state or province, and an area that spans zones is called only when
+  it is inside hours in all of them. A number it can't place is said, never
+  guessed. Quiz leads it is too early or late to call drop below the ones you
+  can call now, their Call button waits, and their push says when to call.
 - **Quiz leads get called first.** offer's quiz leads (`agencyLeads` in
   Twenty) are a prospect source, `twenty:agencyLeads`: the person who took
   the quiz (never the business's decision maker, when they came through a
