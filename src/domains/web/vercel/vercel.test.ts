@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { openDatabase, type Db } from "../../db";
-import { createVercelApp } from ".";
+import { createVercelApp, databaseNote } from ".";
 
 // What Vercel puts in a function's environment, plus the two secrets COLD needs there.
 const ENV: Record<string, string> = {
@@ -102,5 +102,17 @@ describe("COLD as a Vercel function", () => {
     expect((await call("POST", "/api/session/login", { body: { email: "me@cold.dev", password: "correct horse battery" } })).status).toBe(429);
     expect(await db.get("SELECT count FROM rate_limits WHERE key = 'login:203.0.113.9'")).toEqual({ count: 11 });
     cookie = saved;
+  });
+
+  test("the logs say which database a deployment is on, without saying where it is", async () => {
+    const other = await openDatabase(":memory:");
+    const url = "libsql://cold-operatoruplift.aws-us-east-1.turso.io";
+    const line = await databaseNote(other, url, () => new Date("2026-11-01T11:00:00Z"));
+    expect(line).toMatch(/^Database [0-9a-f]{8}, first used 2026-11-01T11:00:00.000Z\.$/);
+    expect(line).not.toContain("turso");
+    // The same database a day later: the same line.
+    expect(await databaseNote(other, url, () => new Date("2026-11-02T09:00:00Z"))).toBe(line);
+    // Another address: another fingerprint.
+    expect((await databaseNote(other, "libsql://cold-copy-operatoruplift.aws-us-east-1.turso.io")).slice(0, 17)).not.toBe(line.slice(0, 17));
   });
 });

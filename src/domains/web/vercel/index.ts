@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { DbRateLimiter, OwnerAuth } from "../../auth";
-import { connectDatabase, databaseFromEnv, type Db } from "../../db";
+import { connectDatabase, databaseFromEnv, metaValue, type Db } from "../../db";
 import { seedMessagesInto } from "../../messages";
 import { DbFiles, DbSecrets, secretKey } from "../../storage";
 import { Waitlist } from "../../waitlist";
@@ -57,11 +58,25 @@ export async function createVercelApp(db: Db, options: { now?: () => Date } = {}
   });
 }
 
+/**
+ * One line at start, so the logs show which database each deployment is on:
+ * a fingerprint of its address (never the address or the token) and when
+ * COLD first used it. Deployments that print different lines are on
+ * different databases, and a login made on one is not on the other.
+ */
+export async function databaseNote(db: Db, url: string, now: () => Date = () => new Date()): Promise<string> {
+  const firstUsed = await metaValue(db, "first_used_at", () => now().toISOString());
+  const fingerprint = createHash("sha256").update(url).digest("hex").slice(0, 8);
+  return `Database ${fingerprint}, first used ${firstUsed}.`;
+}
+
 /** Starts once per instance, on the first request, and is reused while the instance stays warm. */
 async function boot(): Promise<(request: Request) => Promise<Response>> {
   const where = databaseFromEnv();
   if (!where) throw new Error("COLD needs its database: add Turso to this project (Vercel, Storage), or set COLD_DATABASE_URL and COLD_DATABASE_TOKEN.");
-  return createVercelApp(await connectDatabase(where));
+  const db = await connectDatabase(where);
+  console.log(await databaseNote(db, where.url));
+  return createVercelApp(db);
 }
 
 let ready: Promise<(request: Request) => Promise<Response>> | undefined;
