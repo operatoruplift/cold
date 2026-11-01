@@ -29,6 +29,10 @@ export interface SetupCodes {
 }
 
 /** The code in this server's memory: right for one server on your computer. */
+/** Wrong setup codes before the code is replaced, so guessing it gets nowhere. */
+const SETUP_TRIES = 20;
+const REPLACED = `${SETUP_TRIES} wrong setup codes were tried, so the setup code was replaced with a new one (below). The old one no longer works.`;
+
 export class SetupCode implements SetupCodes {
   private code?: string;
   private failures = 0;
@@ -49,7 +53,10 @@ export class SetupCode implements SetupCodes {
   async check(given: string): Promise<boolean> {
     if (!this.code) return false;
     if (sameSetupCode(given, this.code)) return true;
-    if (++this.failures >= 20) await this.issue();
+    if (++this.failures >= SETUP_TRIES) {
+      console.warn(REPLACED);
+      await this.issue();
+    }
     return false;
   }
 
@@ -93,7 +100,10 @@ export class DbSetupCode implements SetupCodes {
     const row = await this.db.get<{ value: string }>(
       "INSERT INTO meta (key, value) VALUES ('setup_failures', '1') ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) RETURNING value",
     );
-    if (Number(row?.value) >= 20) await this.issue();
+    if (Number(row?.value) >= SETUP_TRIES) {
+      console.warn(REPLACED);
+      await this.issue();
+    }
     return false;
   }
 

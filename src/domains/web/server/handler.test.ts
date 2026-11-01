@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { OwnerAuth } from "../../auth";
 import { openDatabase } from "../../db";
 import { Waitlist } from "../../waitlist";
 import type { BuiltAssets } from "./assets";
-import { clientAddress, createHandler, SetupCode } from "./handler";
+import { clientAddress, createHandler, DbSetupCode, SetupCode } from "./handler";
 import { serverSettings } from "./settings";
 
 const assets: BuiltAssets = {
@@ -119,11 +119,27 @@ describe("signing in", () => {
     expect(last).toBe(429);
   });
 
-  test("twenty wrong setup codes replace the code", async () => {
-    await setup.issue();
-    for (let i = 0; i < 20; i++) await setup.check("nope");
-    expect(announced).toHaveLength(2);
-    expect(announced[0]).not.toBe(announced[1]);
+  test("twenty wrong setup codes replace the code, and the log says why", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await setup.issue();
+      for (let i = 0; i < 20; i++) await setup.check("nope");
+      expect(announced).toHaveLength(2);
+      expect(announced[0]).not.toBe(announced[1]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("20 wrong setup codes were tried, so the setup code was replaced"));
+      // The same in the database, where every copy of the server shares the count.
+      const codes: string[] = [];
+      const shared = new DbSetupCode(await openDatabase(":memory:"), (code) => void codes.push(code));
+      await shared.announceIfNeeded();
+      for (let i = 0; i < 19; i++) await shared.check("nope");
+      expect(await shared.check(codes[0]!)).toBe(true);
+      await shared.check("nope");
+      expect(codes).toHaveLength(2);
+      expect(await shared.check(codes[0]!)).toBe(false);
+      expect(await shared.check(codes[1]!)).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
