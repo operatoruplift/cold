@@ -367,7 +367,6 @@ export function databaseFromEnv(env: Record<string, string | undefined> = proces
   return undefined;
 }
 
-/** A value stored once and kept: the first call makes it, later calls read it. */
 /**
  * Claim a job that runs now and then (a look for new leads, logging calls)
  * for every server on this database: true when it last ran at least
@@ -384,6 +383,7 @@ export async function claimRun(db: Db, key: string, now: Date, everyMs: number):
   return changes > 0;
 }
 
+/** A value stored once and kept: the first call makes it, later calls read it. */
 export async function metaValue(db: Db, key: string, make: () => string): Promise<string> {
   const found = await db.get<{ value: string }>("SELECT value FROM meta WHERE key = ?", key);
   if (found) return found.value;
