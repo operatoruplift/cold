@@ -344,6 +344,33 @@ bun run cold email run founder-direct --source csv:examples/prospects.csv --dry-
 - Drop `--dry-run` to send. Nothing sends until `cold.yaml` exists and you
   confirm the batch.
 
+### From Claude (MCP)
+
+`bun run mcp` serves COLD to Claude, or any MCP client, over stdio: the same
+files, database and rules as the app, from your computer. Add it to Claude
+Code:
+
+```bash
+claude mcp add cold -- bun run --cwd /path/to/cold mcp
+```
+
+Or to Claude Desktop, in `claude_desktop_config.json` (give bun's full path,
+`~/.bun/bin/bun`, when Desktop can't find it, and `COLD_HOME` when your files
+live elsewhere):
+
+```json
+{ "mcpServers": { "cold": { "command": "bun", "args": ["run", "--cwd", "/path/to/cold", "mcp"] } } }
+```
+
+Then ask in plain words: "what's going out today on the tint campaign?",
+"prep me to call Sam", "which quiz leads haven't been called?", "log the
+dialer's calls". It reads your status, campaigns and their plan for today,
+prospect lists, activity, results, call scripts and sheets (with each
+prospect's local time) and quiz leads; logs the dialer's calls and DMs you
+sent by hand; and follows or stops a send. Sends wait for you:
+`cold_send_emails` and `cold_send_x_dm` only show what would go out, and go
+out only when called again with `confirm=true` after you have said yes.
+
 ## A day with it
 
 ```bash
@@ -521,7 +548,9 @@ records go to `.cold/touches.jsonl`.
 | `cold email verify` | Check addresses with Reacher (`--record` suppresses invalid ones) |
 | `cold dm run <sequence>` | Work through today's DMs, or `--export` a checklist for a VA |
 | `cold call sync` | Write the call scripts into the dialer |
-| `cold call sheet <script>` | Print a call script and every objection answer |
+| `cold call sheet <script>` | Print a call script and every objection answer, with the prospect's local time |
+| `cold call log` | Log the dialer's calls, with their outcomes, into the touch log (`--dry-run` to check) |
+| `bun run mcp` | COLD as an MCP server for Claude, over stdio (see [From Claude](#from-claude-mcp)) |
 | `cold stats` | Reply rate per message and per sequence |
 | `cold log <prospect>` | Log a touch by hand (a reply on the phone, an opt-out) |
 
@@ -597,7 +626,12 @@ src/
     outreach/             variables and rendering per prospect
     email/                build, send, sync replies, verify
     dm/                   the DM queue
-    call/                 dialer script sync and call sheets
+    call/                 dialer script sync, call sheets, and the dialer's calls into the touch log
+    callHours/            each prospect's local time and calling hours (phone prefix zones from libphonenumber)
+    leads/                offer's quiz leads: the call-first list and the ntfy push
+    listen/               OpenMagpie's listening matches, kept once each
+    xApi/                 X's official API: OAuth 2.0 sign-in and DMs
+    mcp/                  COLD as an MCP server: the tools, over its own API
     stats/                reply rates
     twenty/               the API client and the schema
     cli/                  terminal input and output

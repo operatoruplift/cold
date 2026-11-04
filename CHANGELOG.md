@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Drive COLD from Claude.** `bun run mcp` is an MCP server over stdio
+  (`claude mcp add cold -- bun run --cwd /path/to/cold mcp`), with sixteen
+  tools on COLD's own API, so they keep its rules: status, campaigns and
+  today's plan for each (who is due with the exact message, who is held,
+  waiting or skipped and why), prospect lists, recent activity, results, call
+  scripts and call sheets with the prospect's local time, quiz leads, logging
+  the dialer's calls and DMs sent by hand, and following or stopping a send.
+  Sending is two steps: `cold_send_emails` and `cold_send_x_dm` show what
+  would go out, and send only when called again with `confirm=true` after
+  you say yes. Every answer reads as Markdown, or as COLD's JSON, in pages
+  that stay under 25,000 characters. Built on the MCP TypeScript SDK v2.
 - **The dialer's calls come back.** Every call the dialer logs with an
   outcome becomes a touch in COLD, on the business's or the quiz lead's
   timeline: the outcome, the dialer's AI score and tone, and its summary,
