@@ -52,11 +52,11 @@
   come as one), tapping it opens the lead; it looks once a minute across
   every server on the database, never pushes a lead twice, retries one that
   failed, never pushes leads from before it was set up, and takes more than
-  one look's 500 new leads over the next looks, oldest first, skipping none. Settings, Lead
-  alerts sends a test. A lead who opted out anywhere, "do not call" on the
-  dialer included, is Do Not Contact: last on Calls, with no Call button,
-  and never pushed. Their answers read whether offer writes the JSON on one
-  line or several.
+  one look's 500 new leads over the next looks, oldest first, skipping
+  none. Settings, Lead alerts sends a test. A lead who opted out anywhere,
+  "do not call" on the dialer included, is Do Not Contact: last on Calls,
+  with no Call button, and never pushed. Their answers read whether offer
+  writes the JSON on one line or several.
 - **Picking a dialer prospect fills the script in again.** Prospects from
   `twenty:agencyProspects` and `twenty:agencyPeople` were never found by
   their key in a call sheet or a research run, so the script kept its
