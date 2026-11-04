@@ -82,11 +82,26 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const SHARED_INBOX = /^(info|hello|hi|contact|office|admin|sales|support|team|bookings?|enquiries|inquiries|service|mail|frontdesk|reception)@/i;
 
-/** The channels a prospect can be reached on: an email that hasn't bounced, their profiles, a phone the dialer didn't find wrong. */
-export function reachableOn(prospect: Prospect, history: Touch[]): Channel[] {
+/** A dialed number and a phone, by their last ten digits: "(512) 555-0147" and "+1 512 555 0147" are one number. */
+function sameNumber(dialed: string, phone: string | undefined): boolean {
+  const digits = (s: string | undefined) => (s ?? "").replace(/\D/g, "").slice(-10);
+  return !!digits(dialed) && digits(dialed) === digits(phone);
+}
+
+/**
+ * The channels a prospect can be reached on: an email that hasn't bounced,
+ * their profiles, and a phone, unless the dialer's latest call found that
+ * same number wrong or dead in the last 90 days.
+ */
+export function reachableOn(prospect: Prospect, history: Touch[], now: Date): Channel[] {
   const bounced = history.some((t) => t.channel === "EMAIL" && (t.kind === "BOUNCED" || t.kind === "UNDELIVERABLE"));
   const lastCall = latestCall(history);
-  const deadNumber = !!lastCall && DEAD_NUMBERS.has(lastCall.disposition);
+  const deadNumber =
+    !!lastCall &&
+    DEAD_NUMBERS.has(lastCall.disposition) &&
+    now.getTime() - Date.parse(lastCall.touch.occurredAt) < CALL_MEMORY_DAYS * 86_400_000 &&
+    // A call to a number they no longer have says nothing about the one they have now.
+    (!lastCall.touch.toAddress || sameNumber(lastCall.touch.toAddress, prospect.phone));
   const found: Array<[Channel, unknown]> = [
     ["email", prospect.email && !bounced],
     ["linkedin", prospect.linkedinUrl],
@@ -134,7 +149,7 @@ export function decisionState(input: DecisionInput): Record<string, unknown> {
     today: day(input.now),
     seller: { sells_to: offer.audience, offers: offer.offer, outcome: offer.outcome, pain_it_removes: offer.pain, proof: offer.proof, writes_as: input.sender.voice === "company" ? "the company (we)" : "one person (I)" },
     prospect: listFacts(input.prospect),
-    can_reach_them_by: reachableOn(input.prospect, input.history),
+    can_reach_them_by: reachableOn(input.prospect, input.history, input.now),
     diligence: dossier && {
       summary: dossier.summary,
       offerings: short(dossier.offerings, 8),
@@ -157,7 +172,7 @@ const describeAngle = (a: Angle) => `${ANGLE_GUIDE[a].label}: ${ANGLE_GUIDE[a].w
 
 /** The questions asked about every prospect: ten at most, so Jev answers them in one request. */
 export function outboundQuestions(input: DecisionInput): Record<string, Question> {
-  const channels = reachableOn(input.prospect, input.history);
+  const channels = reachableOn(input.prospect, input.history, input.now);
   const questions: Record<string, Question> = {
     fit: {
       type: "noul",
@@ -218,7 +233,7 @@ export function scoreOf(f: Record<Factor, number>): number {
  */
 export function combine(input: DecisionInput, result: DecisionResult & { provider: "jev" | "claude" }, reviewBelow = REVIEW_BELOW): Decision {
   const a = result.answers;
-  const channels = reachableOn(input.prospect, input.history);
+  const channels = reachableOn(input.prospect, input.history, input.now);
   const budget = a.budget?.type === "score" ? a.budget.score / 3 : 0.5;
   const factors: Decision["factors"] = {
     fit: { value: noul(a.fit), reason: a.fit?.reason },

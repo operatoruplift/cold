@@ -173,7 +173,8 @@ about them.
 The dialer's calls are part of what the model reads: each one in the history
 with its outcome, the dialer's AI score and tone, and its summary. A wrong or
 bad number stops counting the phone as a way to reach them, which lowers
-their reach score.
+their reach score: for 90 days, and only while their phone is still the number
+that was dialed.
 
 Anyone marked Do Not Contact, or who ever opted out, is never researched or
 scored.

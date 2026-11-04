@@ -5,6 +5,8 @@ import type { Dossier } from "./diligence";
 import { allowedAngles, combine, decisionState, outboundQuestions, reachableOn, scoreOf, tierOf, type DecisionInput } from "./model";
 import type { Answer, DecisionResult } from "./types";
 
+const NOW = new Date("2026-10-31T12:00:00Z");
+
 const prospect = (extra: Partial<Prospect> = {}): Prospect => ({
   key: "csv:1",
   identities: ["csv:1", "email:dana@clearview.example"],
@@ -93,7 +95,7 @@ describe("the questions", () => {
   });
 
   test("an email that bounced is not a way to reach them", () => {
-    expect(reachableOn(prospect(), [{ kind: "BOUNCED", channel: "EMAIL", prospectKey: "csv:1", occurredAt: "2026-10-01T10:00:00Z" } as Touch])).toEqual(["phone"]);
+    expect(reachableOn(prospect(), [{ kind: "BOUNCED", channel: "EMAIL", prospectKey: "csv:1", occurredAt: "2026-10-01T10:00:00Z" } as Touch], NOW)).toEqual(["phone"]);
   });
 });
 
@@ -128,10 +130,18 @@ describe("the decision", () => {
     expect(notInterested.action).toBe("nurture");
     expect(notInterested.reviewReasons[0]).toContain("they said they weren't interested on a call on 2026-10-20");
     expect(combine(input({ history: [call("NOT_INTERESTED", "2026-06-01T15:00:00Z")] }), answers()).action).toBe("contact_now");
-    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-30T15:00:00Z")])).toEqual(["email"]);
-    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-28T15:00:00Z"), call("GOOD_NUMBER", "2026-10-30T15:00:00Z")])).toEqual(["email", "phone"]);
+    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-30T15:00:00Z")], NOW)).toEqual(["email"]);
+    expect(reachableOn(prospect(), [call("WRONG_NUMBER", "2026-10-28T15:00:00Z"), call("GOOD_NUMBER", "2026-10-30T15:00:00Z")], NOW)).toEqual(["email", "phone"]);
     const interested = combine(input({ history: [call("INTERESTED", "2026-10-30T15:00:00Z")] }), answers({ action: choice("skip", 0.9) }));
     expect(interested.reviewReasons).toContain('It says skip, but the dialer logged "interested" on a call on 2026-10-30.');
+  });
+
+  test("a wrong or bad number holds for 90 days, and only for the number that was dialed", () => {
+    const wrong = (at: string, toAddress?: string): Touch => ({ kind: "CALLED", channel: "CALL", templateId: "dialer:WRONG_NUMBER", prospectKey: "csv:1", occurredAt: at, toAddress });
+    expect(reachableOn(prospect(), [wrong("2026-10-30T15:00:00Z", "(512) 555-0101")], NOW)).toEqual(["email"]);
+    expect(reachableOn(prospect(), [wrong("2026-06-01T15:00:00Z", "(512) 555-0101")], NOW)).toEqual(["email", "phone"]);
+    expect(reachableOn(prospect(), [wrong("2026-10-30T15:00:00Z", "+1 512 555 0199")], NOW)).toEqual(["email", "phone"]);
+    expect(reachableOn(prospect(), [{ ...wrong("2026-10-30T15:00:00Z"), templateId: "dialer:BAD_NUMBER" }], NOW)).toEqual(["email"]);
   });
 
   test("an unsure call, a contradiction, or a decision on the list alone goes to you to check", () => {

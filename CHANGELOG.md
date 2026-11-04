@@ -25,7 +25,8 @@
     dialer's prospect is marked Do Not Contact.
   - The decision engine reads the calls in their history. Someone who opted
     out is always skipped; "not interested" on a recent call turns reach out
-    now into later; a wrong or bad number is no longer a way to reach them;
+    now into later; a wrong or bad number is no longer a way to reach them
+    for 90 days, unless their number has changed since;
     and skipping someone who was interested goes to you to check.
   - Quiz leads say how their last call went.
 - **Calls at their hour.** A call sheet for a prospect, in the app and from
