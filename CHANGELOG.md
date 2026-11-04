@@ -50,7 +50,8 @@
   phone through ntfy within a minute of each qualified lead (several at once
   come as one), tapping it opens the lead; it looks once a minute across
   every server on the database, never pushes a lead twice, retries one that
-  failed, and never pushes leads from before it was set up. Settings, Lead
+  failed, never pushes leads from before it was set up, and takes more than
+  one look's 500 new leads over the next looks, oldest first, skipping none. Settings, Lead
   alerts sends a test. A lead who opted out anywhere, "do not call" on the
   dialer included, is Do Not Contact: last on Calls, with no Call button,
   and never pushed. Their answers read whether offer writes the JSON on one

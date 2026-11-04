@@ -16,12 +16,22 @@ function fakeTwenty() {
     const url = new URL(String(input));
     const filter = url.searchParams.get("filter") ?? "";
     const after = /createdAt\[(gt|gte)\]:"([^"]+)"/.exec(filter);
+    const upTo = /createdAt\[lte\]:"([^"]+)"/.exec(filter)?.[1];
+    const cursor = /(?:^|[(,])id\[gt\]:"([^"]+)"/.exec(filter)?.[1];
     const ids = /id\[in\]:\[([^\]]*)\]/.exec(filter)?.[1]?.split(",").map((s) => s.replace(/"/g, ""));
-    const rows = (url.pathname === "/rest/agencyLeads" ? state.leads : state.prospects).filter((r) => {
-      if (ids && !ids.includes(r.id as string)) return false;
-      if (after) return after[1] === "gt" ? (r.createdAt as string) > after[2]! : (r.createdAt as string) >= after[2]!;
-      return true;
-    });
+    const limit = Number(url.searchParams.get("limit")) || Number.POSITIVE_INFINITY;
+    const rows = (url.pathname === "/rest/agencyLeads" ? state.leads : state.prospects)
+      .filter((r) => {
+        const at = r.createdAt as string;
+        if (ids && !ids.includes(r.id as string)) return false;
+        if (cursor && (r.id as string) <= cursor) return false;
+        if (upTo && at > upTo) return false;
+        if (after) return after[1] === "gt" ? at > after[2]! : at >= after[2]!;
+        return true;
+      })
+      // Like Twenty: in id order, a page at a time, as cold asks (order_by id, limit, id[gt] for the next page).
+      .sort((a, b) => ((a.id as string) < (b.id as string) ? -1 : (a.id as string) > (b.id as string) ? 1 : 0))
+      .slice(0, limit);
     return Response.json({ data: { [url.pathname.slice(6)]: rows } });
   }) as typeof fetch;
   return { state, client: new TwentyClient({ baseUrl: "https://crm.example", apiKey: "k" }, fetchImpl) };
@@ -264,6 +274,27 @@ describe("LeadWatch", () => {
     expect(ntfy.state.sent[0]!.body.title).toBe("6 new quiz leads");
     later(60);
     expect((await w.tick()).alerted).toBe(0);
+  });
+
+  test("more new leads than one look reads come over the next looks, oldest first, and none is skipped", async () => {
+    const w = watch();
+    await w.tick();
+    later(90);
+    // 1,200 leads in the last minute whose ids sort in another order than their times, as Twenty's do.
+    const start = clock.getTime() - 60_000;
+    for (let i = 0; i < 1200; i++) {
+      twenty.state.leads.push({ id: `lead-${String((i * 7919) % 1200).padStart(4, "0")}`, contactName: `Lead ${i}`, note: note(`Lead ${i}`), qualificationStatus: "QUALIFIED", createdAt: new Date(start + i * 10).toISOString() });
+    }
+    const newest = new Date(start + 1199 * 10).toISOString();
+    let found = 0;
+    for (let look = 0; look < 10 && (await w.state()).seenUntil !== newest; look++) {
+      found += (await w.tick()).found;
+      later(90);
+    }
+    expect((await w.state()).seenUntil).toBe(newest);
+    expect(found).toBe(1200);
+    expect(ntfy.state.sent.length).toBeGreaterThan(1);
+    expect(ntfy.state.sent.every((s) => /^\d+\+? new quiz leads$/.test(s.body.title))).toBe(true);
   });
 });
 
