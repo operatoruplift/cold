@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { DEFAULT_CALL_HOURS } from "../types";
 import { DEFAULT_FOOTERS, parseConfig } from "./parseConfig";
 
 const example = parse(readFileSync(path.resolve(import.meta.dir, "../../../../cold.example.yaml"), "utf8"));
@@ -31,6 +32,8 @@ describe("parseConfig", () => {
 
   test("the calls section is optional: 8am to 9pm every day, in the prospect's time", () => {
     expect(parseConfig(example, "x").config!.calls).toEqual({ start: "08:00", end: "21:00", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] });
+    // Each config has its own copy of the default days: editing one never edits the defaults.
+    expect(parseConfig(example, "x").config!.calls.days).not.toBe(DEFAULT_CALL_HOURS.days);
     const tuned = parseConfig({ ...example, calls: { start: "09:00", end: "18:30", days: ["Mon", "tue", "wed", "thu", "fri"] } }, "x");
     expect(tuned.config!.calls).toEqual({ start: "09:00", end: "18:30", days: ["mon", "tue", "wed", "thu", "fri"] });
     expect(parseConfig({ ...example, calls: { end: "20:00" } }, "x").config!.calls.start).toBe("08:00");

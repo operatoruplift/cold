@@ -1,8 +1,8 @@
 import { DEFAULT_CALL_HOURS, type CallHours } from "../config";
 import { claimRun, type Db } from "../db";
-import { loadAgencyLeads } from "../prospects";
+import { loadAgencyLeads, type Prospect } from "../prospects";
 import type { Touch } from "../touches";
-import { filterValue, type TwentyClient } from "../twenty";
+import { filterAnd, filterValue, type TwentyClient, type TwentyRecord } from "../twenty";
 import { countPush, lastCall, leadPush, quizLead, rankLeads, readNtfy, sendNtfy } from "./helpers";
 import { LEAD_CHECK_MS, LEAD_WINDOW_DAYS, MAX_LEAD_PUSHES, MAX_LEADS_PER_CHECK, type LeadCheck, type NtfyTarget, type QuizLead } from "./types";
 
@@ -36,7 +36,9 @@ export interface LeadWatchOptions {
  * they get a call while the quiz is fresh. It looks at most once a minute
  * across every server on the database (the look is claimed in it), and only
  * at leads newer than the last one it saw. The first look only marks the
- * time: leads from before alerts were set up are never pushed.
+ * time: leads from before alerts were set up are never pushed. More new
+ * leads than one look reads come over the next looks, oldest first, and none
+ * is skipped.
  */
 export class LeadWatch {
   private nextAt = 0;
@@ -66,7 +68,7 @@ export class LeadWatch {
     let found = 0;
     try {
       const hours = (await this.options.hours?.()) ?? DEFAULT_CALL_HOURS;
-      const rows = await loadAgencyLeads(client, { where: `createdAt[gt]:${filterValue(seen.value)}`, limit: MAX_LEADS_PER_CHECK });
+      const { rows, until } = await this.newLeads(client, seen.value);
       // A log that can't be opened only leaves the opt-outs out, as on the Calls page.
       const suppressions = rows.length ? ((await this.options.suppressions?.().catch(() => [])) ?? []) : [];
       const leads = rows
@@ -76,9 +78,10 @@ export class LeadWatch {
       found = leads.length;
       const due = leads.filter((l) => l.qualified && !l.doNotContact);
       const newest = leads.at(-1)?.createdAt;
-      const lots = rows.length >= MAX_LEADS_PER_CHECK;
-      if (due.length > MAX_LEAD_PUSHES || (lots && due.length)) {
-        await sendNtfy(target, countPush(due, this.options.appUrl, lots), this.options.fetch);
+      // More came in than one look reads: this look took the oldest of them, and the next look carries on.
+      const more = until !== undefined || rows.length >= MAX_LEADS_PER_CHECK;
+      if (due.length > MAX_LEAD_PUSHES || (more && due.length)) {
+        await sendNtfy(target, countPush(due, this.options.appUrl, more), this.options.fetch);
         alerted = 1;
         if (newest) await this.setSeen(newest);
         return { looked: true, alerted, found };
@@ -94,6 +97,30 @@ export class LeadWatch {
       return { looked: true, alerted, found };
     } catch (err) {
       return { looked: true, alerted, found, error: (err as Error).message };
+    }
+  }
+
+  /**
+   * The leads that came in after `after`: every one of them up to a time, so
+   * marking the newest seen never passes one that wasn't read. Twenty lists
+   * by id, not by time, so when more came in than one look reads, the window
+   * closes at the median time of what was read, again until it fits; `until`
+   * is where it closed, and the next look carries on from there.
+   */
+  private async newLeads(client: TwentyClient, after: string): Promise<{ rows: Array<{ record: TwentyRecord; prospect: Prospect }>; until?: string }> {
+    let until: string | undefined;
+    for (;;) {
+      const where = filterAnd(`createdAt[gt]:${filterValue(after)}`, until ? `createdAt[lte]:${filterValue(until)}` : undefined);
+      const rows = await loadAgencyLeads(client, { where, limit: MAX_LEADS_PER_CHECK });
+      if (rows.length < MAX_LEADS_PER_CHECK) return { rows, until };
+      const times = rows
+        .map((r) => r.record.createdAt)
+        .filter((t): t is string => typeof t === "string" && t > after)
+        .sort();
+      const median = times[Math.floor((times.length - 1) / 2)];
+      // Hundreds of leads in one millisecond can't be told apart by time: take them as they are.
+      if (!median || (until !== undefined && median >= until)) return { rows, until };
+      until = median;
     }
   }
 

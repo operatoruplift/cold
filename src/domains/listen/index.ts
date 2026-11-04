@@ -12,23 +12,25 @@ export interface ListenWatch {
   latest: string;
 }
 
+/** Matches written by one INSERT: seven values each, far under SQLite's limit on values in a statement. */
+const ROWS_PER_INSERT = 100;
+
 /** The matches OpenMagpie sent, in the app's database. Each key is kept once. */
 export class ListenStore {
   constructor(private readonly db: Db) {}
 
-  /** Keep new matches; one already kept (a redelivery) is left as it is. */
+  /**
+   * Keep new matches, a hundred to a statement, so a 500-match digest is five
+   * writes rather than five hundred round trips to the database. One already
+   * kept (a redelivery, or twice in one delivery) is left as it is.
+   */
   async receive(items: ListenItem[]): Promise<{ added: number }> {
     let added = 0;
-    for (const item of items) {
+    for (let i = 0; i < items.length; i += ROWS_PER_INSERT) {
+      const rows = items.slice(i, i + ROWS_PER_INSERT);
       const { changes } = await this.db.run(
-        "INSERT INTO listen_items (key, watch_id, watch_name, source_kind, occurred_at, received_at, item) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING",
-        item.key,
-        item.watchId,
-        item.watchName,
-        item.sourceKind,
-        item.occurredAt ?? item.receivedAt,
-        item.receivedAt,
-        JSON.stringify(item),
+        `INSERT INTO listen_items (key, watch_id, watch_name, source_kind, occurred_at, received_at, item) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")} ON CONFLICT (key) DO NOTHING`,
+        ...rows.flatMap((item) => [item.key, item.watchId, item.watchName, item.sourceKind, item.occurredAt ?? item.receivedAt, item.receivedAt, JSON.stringify(item)]),
       );
       added += changes;
     }

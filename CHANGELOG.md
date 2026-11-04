@@ -25,7 +25,8 @@
     dialer's prospect is marked Do Not Contact.
   - The decision engine reads the calls in their history. Someone who opted
     out is always skipped; "not interested" on a recent call turns reach out
-    now into later; a wrong or bad number is no longer a way to reach them;
+    now into later; a wrong or bad number is no longer a way to reach them
+    for 90 days, unless their number has changed since;
     and skipping someone who was interested goes to you to check.
   - Quiz leads say how their last call went.
 - **Calls at their hour.** A call sheet for a prospect, in the app and from
@@ -50,11 +51,12 @@
   phone through ntfy within a minute of each qualified lead (several at once
   come as one), tapping it opens the lead; it looks once a minute across
   every server on the database, never pushes a lead twice, retries one that
-  failed, and never pushes leads from before it was set up. Settings, Lead
-  alerts sends a test. A lead who opted out anywhere, "do not call" on the
-  dialer included, is Do Not Contact: last on Calls, with no Call button,
-  and never pushed. Their answers read whether offer writes the JSON on one
-  line or several.
+  failed, never pushes leads from before it was set up, and takes more than
+  one look's 500 new leads over the next looks, oldest first, skipping
+  none. Settings, Lead alerts sends a test. A lead who opted out anywhere,
+  "do not call" on the dialer included, is Do Not Contact: last on Calls,
+  with no Call button, and never pushed. Their answers read whether offer
+  writes the JSON on one line or several.
 - **Picking a dialer prospect fills the script in again.** Prospects from
   `twenty:agencyProspects` and `twenty:agencyPeople` were never found by
   their key in a call sheet or a research run, so the script kept its
@@ -65,8 +67,9 @@
   delivered, and each watch is a prospect source, `listen:<watch>`: the
   trigger line is the post itself, quoted, and a post on X carries its
   author's handle for an X DM. **Save as a list** in Settings writes a
-  watch's matches to one of your own lists to fill in and research; saving
-  again only adds what is new. Prospect sources are defined once, so
+  watch's matches to one of your own lists to fill in and research, one
+  list per watch even when two share a name; saving again only adds what is
+  new. Prospect sources are defined once, so
   research and campaigns accept the same ones.
 - **X DMs go out from COLD.** Add your own X developer app in Settings
   (`X_CLIENT_ID`, `X_CLIENT_SECRET`) and press **Connect X** for an account:

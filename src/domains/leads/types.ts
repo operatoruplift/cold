@@ -68,5 +68,5 @@ export const LEAD_CHECK_MS = 60_000;
 export const LEAD_WINDOW_DAYS = 14;
 /** More new leads than this in one look come as one push that counts them. */
 export const MAX_LEAD_PUSHES = 5;
-/** A look reads at most this many new leads. */
+/** A look reads at most this many new leads; more come over the next looks, oldest first. */
 export const MAX_LEADS_PER_CHECK = 500;
