@@ -25,6 +25,8 @@ export interface LeadWatchOptions {
   appUrl?: string;
   /** Calling hours, so a push says when a lead can be called; cold.yaml's calls: by default 8am to 9pm. */
   hours?: () => Promise<CallHours>;
+  /** The touch log's opt-outs, so no push goes out for a lead who opted out anywhere. */
+  suppressions?: () => Promise<Touch[]>;
   fetch?: typeof fetch;
   now?: () => Date;
 }
@@ -65,8 +67,10 @@ export class LeadWatch {
     try {
       const hours = (await this.options.hours?.()) ?? DEFAULT_CALL_HOURS;
       const rows = await loadAgencyLeads(client, { where: `createdAt[gt]:${filterValue(seen.value)}`, limit: MAX_LEADS_PER_CHECK });
+      // A log that can't be opened only leaves the opt-outs out, as on the Calls page.
+      const suppressions = rows.length ? ((await this.options.suppressions?.().catch(() => [])) ?? []) : [];
       const leads = rows
-        .map(({ record, prospect }) => quizLead(record, prospect, undefined, { hours, now }))
+        .map(({ record, prospect }) => quizLead(record, prospect, undefined, { hours, now }, suppressions))
         .filter((l) => l.createdAt && l.createdAt > seen.value)
         .sort((a, b) => a.createdAt!.localeCompare(b.createdAt!));
       found = leads.length;
@@ -107,12 +111,16 @@ export class LeadWatch {
 
 /**
  * The quiz leads of the last days, best to call first, each with when it was
- * last called. calls gives the touch log's calls since a time.
+ * last called. calls gives the touch log's calls since a time; suppressions
+ * its opt-outs, so a lead who opted out anywhere is Do Not Contact.
  */
-export async function recentLeads(client: TwentyClient, options: { now: Date; days?: number; hours?: CallHours; calls?: (since: string) => Promise<Touch[]> }): Promise<QuizLead[]> {
+export async function recentLeads(
+  client: TwentyClient,
+  options: { now: Date; days?: number; hours?: CallHours; calls?: (since: string) => Promise<Touch[]>; suppressions?: () => Promise<Touch[]> },
+): Promise<QuizLead[]> {
   const since = new Date(options.now.getTime() - (options.days ?? LEAD_WINDOW_DAYS) * 86_400_000).toISOString();
   const rows = await loadAgencyLeads(client, { where: `createdAt[gte]:${filterValue(since)}`, limit: 200 });
-  const calls = (await options.calls?.(since)) ?? [];
+  const [calls, suppressions] = await Promise.all([options.calls?.(since) ?? [], options.suppressions?.() ?? []]);
   const clock = { hours: options.hours ?? DEFAULT_CALL_HOURS, now: options.now };
-  return rankLeads(rows.map(({ record, prospect }) => quizLead(record, prospect, lastCall(prospect, calls), clock)));
+  return rankLeads(rows.map(({ record, prospect }) => quizLead(record, prospect, lastCall(prospect, calls), clock, suppressions)));
 }

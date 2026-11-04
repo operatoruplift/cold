@@ -85,6 +85,18 @@ describe("quiz leads", () => {
     expect(quizLead({ ...record, qualificationStatus: undefined }, fromAgencyLead(record)).qualified).toBe(true);
   });
 
+  test('a lead who opted out anywhere is Do Not Contact: "do not call" on the dialer, or an opt-out in the touch log', () => {
+    const record = { id: "lead-1", contactName: "Sam Lee", note: note("Sam Lee"), qualificationStatus: "QUALIFIED", createdAt: "2026-11-01T16:20:00.000Z" };
+    const prospect = fromAgencyLead(record);
+    expect(quizLead(record, prospect).doNotContact).toBe(false);
+    const doNotCall: Touch = { kind: "OPTED_OUT", channel: "CALL", prospectKey: "agencyLeads:lead-1", templateId: "dialer:DNC", occurredAt: "2026-11-01T17:00:00Z" };
+    expect(quizLead(record, prospect, doNotCall)).toMatchObject({ doNotContact: true, callOutcome: "Do not call" });
+    const unsubscribed: Touch = { kind: "OPTED_OUT", channel: "EMAIL", prospectKey: "agencyLeads:lead-1", occurredAt: "2026-10-20T09:00:00Z" };
+    expect(quizLead(record, prospect, undefined, undefined, [unsubscribed]).doNotContact).toBe(true);
+    expect(quizLead(record, prospect, undefined, undefined, [{ ...unsubscribed, prospectKey: "agencyLeads:someone-else" }]).doNotContact).toBe(false);
+    expect(quizLead(record, prospect, undefined, undefined, [{ ...unsubscribed, kind: "BOUNCED" }]).doNotContact).toBe(false);
+  });
+
   test("called, by any of the prospect's identities, the latest call", () => {
     const record = { id: "lead-1", contactName: "Sam Lee", note: note("Sam Lee"), createdAt: "2026-11-01T16:20:00.000Z" };
     const prospect = fromAgencyLead(record);
@@ -181,6 +193,24 @@ describe("LeadWatch", () => {
     expect(ntfy.state.sent).toHaveLength(1);
   });
 
+  test("never pushes a lead who opted out in the touch log, and a log it can't read holds up no push", async () => {
+    const optOuts: Touch[] = [];
+    const w = new LeadWatch({ db, client: () => twenty.client, target: () => TARGET, fetch: ntfy.fetchImpl, now: () => clock, suppressions: async () => optOuts });
+    await w.tick();
+    later(90);
+    add("sam");
+    add("ana");
+    optOuts.push({ kind: "OPTED_OUT", channel: "EMAIL", prospectKey: "agencyLeads:ana", occurredAt: "2026-10-01T09:00:00Z" });
+    expect(await w.tick()).toEqual({ looked: true, alerted: 1, found: 2 });
+    expect(ntfy.state.sent.map((s) => s.body.title)).toEqual(["New quiz lead: Lead sam"]);
+
+    const broken = new LeadWatch({ db, client: () => twenty.client, target: () => TARGET, fetch: ntfy.fetchImpl, now: () => clock, suppressions: async () => Promise.reject(new Error("no log")) });
+    later(90);
+    add("bo");
+    expect(await broken.tick()).toEqual({ looked: true, alerted: 1, found: 1 });
+    expect(ntfy.state.sent.map((s) => s.body.title)).toEqual(["New quiz lead: Lead sam", "New quiz lead: Lead bo"]);
+  });
+
   test("looks at most once a minute, across every server on the database", async () => {
     const one = watch();
     const two = watch();
@@ -258,6 +288,28 @@ describe("recentLeads", () => {
     expect(leads.map((l) => [l.id, l.calledAt])).toEqual([
       ["sam", undefined],
       ["ana", "2026-11-01T17:30:00Z"],
+    ]);
+  });
+
+  test('a lead who said "do not call" or opted out anywhere is Do Not Contact, and goes last', async () => {
+    const twenty = fakeTwenty();
+    twenty.state.leads.push(
+      { id: "sam", contactName: "Sam Lee", note: note("Sam Lee"), createdAt: "2026-11-01T16:00:00.000Z" },
+      { id: "ana", contactName: "Ana Ruiz", note: note("Ana Ruiz"), createdAt: "2026-11-01T17:00:00.000Z" },
+      { id: "bo", contactName: "Bo Diaz", note: note("Bo Diaz"), createdAt: "2026-11-01T17:45:00.000Z" },
+    );
+    const leads = await recentLeads(twenty.client, {
+      now: new Date("2026-11-01T18:00:00.000Z"),
+      calls: async () => [
+        { kind: "CALLED", channel: "CALL", prospectKey: "agencyLeads:sam", templateId: "dialer:CALLBACK", occurredAt: "2026-11-01T16:30:00Z" },
+        { kind: "OPTED_OUT", channel: "CALL", prospectKey: "agencyLeads:ana", templateId: "dialer:DNC", occurredAt: "2026-11-01T17:30:00Z" },
+      ],
+      suppressions: async () => [{ kind: "OPTED_OUT", channel: "EMAIL", prospectKey: "agencyLeads:bo", occurredAt: "2026-10-01T09:00:00Z" }],
+    });
+    expect(leads.map((l) => [l.id, l.doNotContact, l.callOutcome])).toEqual([
+      ["sam", false, "Call back"],
+      ["bo", true, undefined],
+      ["ana", true, "Do not call"],
     ]);
   });
 });

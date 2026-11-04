@@ -1,4 +1,5 @@
 import { readNtfy, recentLeads, sendNtfy, type LeadCheck } from "../../leads";
+import type { TouchStore } from "../../touches";
 import { HttpError, json, type Route } from "../api";
 import type { WebContext } from "../context";
 import type { LeadAlertsResponse, LeadsResponse } from "../types";
@@ -29,19 +30,21 @@ export function leadRoutes(ctx: WebContext): Route[] {
         const client = ctx.twenty();
         if (!client) return json(response);
         const days = Math.max(1, Math.min(Number(url.searchParams.get("days")) || 14, 90));
+        // Called or not, and opted out or not, from the touch log; a log that can't be opened only leaves that out.
+        const fromLog = async <T>(read: (store: TouchStore) => Promise<T[]>): Promise<T[]> => {
+          try {
+            return await read(await ctx.store(await ctx.requireConfig()));
+          } catch {
+            return [];
+          }
+        };
         try {
           response.leads = await recentLeads(client, {
             now: ctx.now(),
             days,
             hours: (await ctx.config()).config?.calls,
-            // Called or not, from the touch log; a log that can't be opened only leaves that out.
-            calls: async (since) => {
-              try {
-                return await (await ctx.store(await ctx.requireConfig())).since(since, { channel: "CALL" });
-              } catch {
-                return [];
-              }
-            },
+            calls: (since) => fromLog((store) => store.since(since, { channel: "CALL" })),
+            suppressions: () => fromLog((store) => store.suppressions()),
           });
         } catch (err) {
           response.error = (err as Error).message;
