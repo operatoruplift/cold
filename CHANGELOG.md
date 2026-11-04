@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **X DMs go out from COLD.** Add your own X developer app in Settings
+  (`X_CLIENT_ID`, `X_CLIENT_SECRET`) and press **Connect X** for an account:
+  a campaign's X queue then has **Send on X**, one approved DM per click,
+  sent from your own account through X's API and logged with X's message
+  id. A step goes out once, even after two clicks or on two servers. A
+  follow-up is never sent to someone who has answered since: their reply is
+  logged instead and the sequence stops for them. **Check X DMs** on the
+  Inbox logs answers to earlier DMs. X sign-ins are sealed with
+  `COLD_SECRET_KEY` when it is set, which a hosted server requires.
+  LinkedIn, Instagram and Facebook stay copy and open.
+
 - **The logs say which database each deployment is on**: at start, a
   fingerprint of its address (never the address or the token), the variable
   it came from, and when COLD first used it. If the fingerprint changes with

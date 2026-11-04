@@ -146,9 +146,17 @@ export async function prepareDmRun(input: { sequence: Sequence; account: Account
 /**
  * Log what happened to one DM: sent (this step), or a reply or opt-out
  * (against the step they answered). An opt-out also marks the source record
- * Do Not Contact. Throws when the store cannot save it.
+ * Do Not Contact. `extra` carries what the platform's API said: the message's
+ * id, and a reply's words. Throws when the store cannot save it.
  */
-export async function recordDmOutcome(store: TouchStore, prepared: Pick<PreparedDmRun, "sequence" | "account" | "channel">, item: DmItem, outcome: DmOutcome, now: Date = new Date()): Promise<void> {
+export async function recordDmOutcome(
+  store: TouchStore,
+  prepared: Pick<PreparedDmRun, "sequence" | "account" | "channel">,
+  item: DmItem,
+  outcome: DmOutcome,
+  now: Date = new Date(),
+  extra: { messageId?: string; body?: string } = {},
+): Promise<void> {
   const sent = outcome === "SENT";
   await store.record({
     kind: outcome,
@@ -161,7 +169,8 @@ export async function recordDmOutcome(store: TouchStore, prepared: Pick<Prepared
     prospectKey: item.prospect.key,
     prospectLabel: item.prospect.label,
     toAddress: item.url,
-    body: sent ? item.text : undefined,
+    body: extra.body ?? (sent ? item.text : undefined),
+    messageId: extra.messageId || undefined,
     occurredAt: now.toISOString(),
     links: item.prospect.links,
   });

@@ -15,7 +15,10 @@ export interface Access {
  * - An Origin, when the browser sends one, must be this server's.
  *
  * /api/health is open to anyone, for a host's uptime checks; /api/cron/
- * carries its own secret instead (Vercel's cron calls it).
+ * carries its own secret instead (Vercel's cron calls it). /api/x/callback is
+ * where X sends the owner back after Connect X: a plain page load, so no
+ * header, answered on this server's own hosts only and trusted only through
+ * its one-time state.
  */
 export function refuseRequest(request: Request, access: Access): string | undefined {
   const { pathname } = new URL(request.url);
@@ -23,6 +26,7 @@ export function refuseRequest(request: Request, access: Access): string | undefi
   const host = request.headers.get("host") ?? "";
   if (!access.hosts.includes(host)) return `cold does not answer on ${host || "this address"}`;
   if (!pathname.startsWith("/api/")) return undefined;
+  if (pathname === "/api/x/callback" && request.method === "GET") return undefined;
   if (request.headers.get("x-cold") !== "1") return "missing the x-cold header";
   const origin = request.headers.get("origin");
   if (origin && !access.origins.includes(origin)) return "cross-origin requests are not allowed";

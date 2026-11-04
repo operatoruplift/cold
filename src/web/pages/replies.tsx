@@ -1,7 +1,7 @@
 import { Ban, ChevronDown, ChevronRight, Copy, Inbox, Mail, MailX, MessageSquareReply, RefreshCw, Sparkles } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import type { Triage } from "../../domains/ai/tasks";
-import type { TouchRow } from "../../domains/web/types";
+import type { ActionResponse, TouchRow, XStatusResponse } from "../../domains/web/types";
 import { useStatus } from "../app/status";
 import { runAndWait } from "../lib/ai";
 import { api, ApiError, useApi } from "../lib/api";
@@ -27,6 +27,24 @@ export function RepliesPage() {
   const touches = useApi<TouchRow[]>("/api/touches?days=30&kinds=REPLIED,OPTED_OUT,BOUNCED&limit=300");
   const chosen = account || inboxes[0]?.key || "";
   const ready = inboxes.find((a) => a.key === chosen)?.email?.imapSet;
+  const x = useApi<XStatusResponse>("/api/x");
+  const onX = (x.data?.accounts ?? []).filter((a) => a.username);
+  const [xChecking, setXChecking] = useState(false);
+  const [xResult, setXResult] = useState<ActionResponse>();
+
+  async function checkX() {
+    setXChecking(true);
+    try {
+      const result = await api<ActionResponse>("/api/x/replies", { method: "POST", body: {} });
+      setXResult(result);
+      touches.reload();
+      toast.success(result.message);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setXChecking(false);
+    }
+  }
 
   async function check() {
     setSyncing(true);
@@ -95,7 +113,16 @@ export function RepliesPage() {
               {sync.lines.length > 0 && <div className="lines">{sync.lines.join("\n")}</div>}
             </>
           )}
-          <p className="hint">Sending a campaign checks the inbox first, too. Replies to DMs are logged from the DM queue.</p>
+          <p className="hint">Sending a campaign checks the inbox first, too. Replies to DMs are logged from the DM queue{onX.length ? ", and X can be read here" : ""}.</p>
+          {onX.length > 0 && (
+            <div className="row wrap">
+              <Button icon={RefreshCw} loading={xChecking} onClick={checkX}>
+                Check X DMs
+              </Button>
+              <span className="hint">Answers to DMs cold sent as {onX.map((a) => `@${a.username}`).join(", ")}: each one stops that sequence.</span>
+            </div>
+          )}
+          {xResult?.lines?.length ? <div className="lines">{xResult.lines.join("\n")}</div> : null}
         </div>
       </Card>
 

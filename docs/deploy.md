@@ -31,8 +31,10 @@ and AI drafts live in Turso, which is SQLite over the network.
 3. **Settings, Environment Variables**, as Sensitive, for Production and
    Preview:
    - `COLD_SECRET_KEY`: a long random string (`openssl rand -base64 36`). It
-     encrypts the keys and passwords you save in COLD's Settings; change it
-     and the saved ones can no longer be read.
+     encrypts the keys and passwords you save in COLD's Settings, and the X
+     sign-ins of Connect X; change it and the saved ones can no longer be
+     read. To send X DMs, register `https://<your domain>/api/x/callback` as
+     your X developer app's callback URL (Settings, X shows the exact one).
    - `CRON_SECRET`: another random string. Vercel's cron sends it to
      `/api/cron/tick`, and COLD refuses the tick without it.
    - `COLD_PUBLIC_URL`, for Production only, if people should use a custom

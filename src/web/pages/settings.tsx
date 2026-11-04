@@ -1,6 +1,6 @@
-import { CheckCircle2, Database, FileText, KeyRound, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, UserRound, Wand2, XCircle } from "lucide-react";
+import { AtSign, CheckCircle2, Copy, Database, FileText, KeyRound, LogOut, Mailbox, MonitorSmartphone, PlugZap, Save, ShieldCheck, Sparkles, Unplug, UserRound, Wand2, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import type { ActionResponse, AiStatusResponse, SessionsResponse, SettingsResponse } from "../../domains/web/types";
+import type { ActionResponse, AiStatusResponse, SessionsResponse, SettingsResponse, XStatusResponse } from "../../domains/web/types";
 import { usePwa, install } from "../app/pwa";
 import { useSession } from "../app/session";
 import { useStatus } from "../app/status";
@@ -132,9 +132,105 @@ export function SettingsPage() {
         </Card>
       </div>
 
+      <XCard />
+
       {settings.loading && !settings.data ? <Loading /> : settings.error ? <ErrorNotice error={settings.error} /> : settings.data && <Secrets settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
       {settings.data && <ConfigEditor settings={settings.data} onSaved={() => (status.reload(), settings.reload())} />}
     </>
+  );
+}
+
+/**
+ * X DMs through X's API: the owner's own developer app, and each account
+ * connected to the X account it sends as. One DM goes out per click, from
+ * the campaign's queue; nothing is sent on its own.
+ */
+function XCard() {
+  const x = useApi<XStatusResponse>("/api/x");
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function connect(account: string) {
+    setBusy(account);
+    try {
+      const { url } = await api<{ url: string }>("/api/x/connect", { method: "POST", body: { account } });
+      window.location.href = url;
+    } catch (err) {
+      toast.error((err as Error).message);
+      setBusy(null);
+    }
+  }
+
+  async function disconnect(account: string) {
+    setBusy(account);
+    try {
+      toast.success((await api<ActionResponse>("/api/x/disconnect", { method: "POST", body: { account } })).message);
+      x.reload();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyCallback() {
+    if (!x.data) return;
+    try {
+      await navigator.clipboard.writeText(x.data.callbackUrl);
+      toast.success("Copied the callback URL.");
+    } catch {
+      toast.error("The browser blocked the clipboard: select the URL and copy it.");
+    }
+  }
+
+  const d = x.data;
+  return (
+    <Card title="X" icon={AtSign}>
+      {x.loading && !d ? (
+        <Loading />
+      ) : x.error ? (
+        <ErrorNotice error={x.error} />
+      ) : (
+        d && (
+          <div className="stack">
+            <p className="hint">
+              Send X DMs from a campaign's queue with one click each, from your own account, through X's API. You approve every one; nothing goes out on its own. LinkedIn, Instagram and Facebook stay copy and open: they have no way for an app to start a conversation.
+            </p>
+            <Check ok={d.configured}>{d.configured ? "Your X developer app is set" : "Add X_CLIENT_ID (and X_CLIENT_SECRET) below, from your app at developer.x.com"}</Check>
+            {!d.available && <Notice tone="amber">This server has no database to keep an X sign-in.</Notice>}
+            <div className="stack" style={{ gap: 4 }}>
+              <span className="hint">Register this as the app's callback URL (User authentication settings, type Web App):</span>
+              <div className="row wrap">
+                <code className="truncate">{d.callbackUrl}</code>
+                <Button size="sm" icon={Copy} onClick={copyCallback}>
+                  Copy
+                </Button>
+              </div>
+            </div>
+            {d.accounts.map((a) => (
+              <div key={a.key} className="row between wrap">
+                <b>
+                  {a.key} <Pill tone={a.voice === "personal" ? "teal" : "purple"}>{a.voice}</Pill>
+                </b>
+                {a.username ? (
+                  <span className="row" style={{ gap: 8 }}>
+                    <Check ok>Sends as @{a.username}</Check>
+                    <Button size="sm" icon={Unplug} loading={busy === a.key} onClick={() => disconnect(a.key)}>
+                      Disconnect
+                    </Button>
+                  </span>
+                ) : (
+                  <Button size="sm" variant="primary" icon={AtSign} loading={busy === a.key} disabled={!d.configured || !d.available} onClick={() => connect(a.key)}>
+                    Connect X
+                  </Button>
+                )}
+              </div>
+            ))}
+            <p className="hint">Your app's X API plan has to include Direct Messages. cold asks X for: read and send DMs, read profiles, stay connected.</p>
+          </div>
+        )
+      )}
+    </Card>
   );
 }
 

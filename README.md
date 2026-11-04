@@ -30,14 +30,15 @@ things in one small server:
 - **The engine underneath**: pick a sequence, point it at a list, and COLD
   works out who is due for which step today. It writes each message with the
   prospect's details, sends the emails from your own mailbox, lines up the DMs
-  for you to send, and prepares your calls. It stops for anyone who replied,
-  bounced or asked to be left alone, and logs every touch in Twenty.
+  for you to send (on X, with one click through X's API), and prepares your
+  calls. It stops for anyone who replied, bounced or asked to be left alone,
+  and logs every touch in Twenty.
 
 Claude does the research and the first drafts: it finds businesses that fit
 your offer, reads their public footprint for one true reason to reach out,
 personalizes each message, preps each call and reads each reply. **You approve
-everything.** Nothing is sent by AI on its own, DMs are always sent by you, and
-calls are always made by you.
+everything.** Nothing is sent by AI on its own, DMs are always sent by you
+(on X, by your click on Send on X), and calls are always made by you.
 
 Every message comes in two voices: **personal**, sent from your own name and
 profiles, and **company**, sent from the brand or a rep. It works with any
@@ -51,7 +52,7 @@ call scripts and the Do Not Contact list.
 - **An app that's yours alone.** `bun run ui` opens it on your computer, or
   host it and install it on your phone. Campaigns that show who is due today,
   a Send button with live progress you can stop, a DM queue with Copy and Open
-  buttons, call scripts, the message library, the inbox, analytics, your
+  buttons (and Send on X), call scripts, the message library, the inbox, analytics, your
   waitlist and settings, behind a login only you have. Your mailbox passwords
   and API keys stay on your machine or your server.
 - **AI that shows its work.** Claude finds prospects and researches them with
@@ -83,9 +84,12 @@ call scripts and the Do Not Contact list.
   and the touch is kept locally, then saved to Twenty before the next run plans
   anything.
 - **DMs that keep your account.** LinkedIn, X and Instagram restrict accounts
-  that send DMs from scripts, so `cold` never does. It writes the next DM due,
-  copies it, opens the profile, and logs what happened when you say. It keeps
-  a daily cap per platform.
+  that send DMs from scripts, so `cold` never scripts one. It writes the next
+  DM due, copies it, opens the profile, and logs what happened when you say.
+  On X you can connect your account instead (your own X developer app, in
+  Settings): **Send on X** sends the DM you approved through X's own API,
+  one per click, checks a follow-up against the conversation first, and
+  **Check X DMs** logs the answers. It keeps a daily cap per platform.
 - **Calls in the dialer.** One command writes the call scripts and objection
   answers into the dialer's `agencyScripts`, so they sit next to every live
   call. For a handset, `cold call sheet` prints one filled in for a prospect.
@@ -149,13 +153,13 @@ bun run cold preview founder-direct --source csv:examples/prospects.csv --prospe
 | Home | What's been sent, replies and opt-outs this week, and what's due in each campaign. |
 | Prospects | Find new prospects with Claude and web search, save them as a list; research a list and save a trigger line per person. |
 | Campaigns | A sequence, the account that sends it, an offer and a prospect list (upload a CSV, use an AI list, or use Twenty). |
-| Campaign | Due now, waiting, skipped and held back, with reasons. Personalize any due message with AI and approve it. Emails: Send, with live progress. DMs: the queue, plus a checklist download for a VA. |
+| Campaign | Due now, waiting, skipped and held back, with reasons. Personalize any due message with AI and approve it. Emails: Send, with live progress. DMs: the queue (on X, Send on X), plus a checklist download for a VA. |
 | Sequences | Every message, previewed with real data, editable in place. |
 | Calls | Every script and objection answer, filled in for a prospect, and AI call prep. Sync scripts to the dialer. |
-| Inbox | Check an inbox for replies, opt-outs and bounces. Claude reads each reply, sorts it (interested, not now, wants out...) and drafts your answer. |
+| Inbox | Check an inbox for replies, opt-outs and bounces, and your X DMs for answers. Claude reads each reply, sorts it (interested, not now, wants out...) and drafts your answer. |
 | Analytics | Reply rate per sequence and per message. |
 | Waitlist | Everyone who joined on your site, with their role and channels. Mark them invited, export a CSV. |
-| Settings | Your login and devices, the AI connection, `cold.yaml` (checked before saving), mailbox URLs, the Twenty key, and a test for each. |
+| Settings | Your login and devices, the AI connection, `cold.yaml` (checked before saving), mailbox URLs, the Twenty key, Connect X, and a test for each. |
 
 ### The site and the waitlist
 

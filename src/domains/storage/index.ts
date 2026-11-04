@@ -202,7 +202,7 @@ export class EnvFileSecrets implements Secrets {
 }
 
 /** AES-256-GCM with the key name bound in, so a value cannot be moved to another key. */
-function seal(key: Buffer, name: string, value: string): string {
+export function seal(key: Buffer, name: string, value: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   cipher.setAAD(Buffer.from(name));
@@ -210,7 +210,7 @@ function seal(key: Buffer, name: string, value: string): string {
   return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), body.toString("base64")].join(":");
 }
 
-function unseal(key: Buffer, name: string, sealed: string): string {
+export function unseal(key: Buffer, name: string, sealed: string): string {
   const [version, iv, tag, body] = sealed.split(":");
   if (version !== "v1" || !iv || !tag || body === undefined) throw new Error(`${name} is not stored in a form this version can read.`);
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64"));
