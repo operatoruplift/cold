@@ -104,8 +104,8 @@ describe("matches as prospects", () => {
 
   test("saved as a list, a match can be filled in, and saving again only adds what is new", async () => {
     const { data } = await call<{ source: string; added: number; rows: number; message: string }>("POST", "/api/listen/export", { watch: "01JWATCH" });
-    expect(data).toMatchObject({ source: "csv:prospects-listen-needs-booking-software.csv", added: 2, rows: 2 });
-    const file = path.join(root, "prospects-listen-needs-booking-software.csv");
+    expect(data).toMatchObject({ source: "csv:prospects-listen-needs-booking-software-01jwatch.csv", added: 2, rows: 2 });
+    const file = path.join(root, "prospects-listen-needs-booking-software-01jwatch.csv");
     const text = readFileSync(file, "utf8");
     expect(text.split("\n")[0]).toBe("id,first_name,full_name,company,email,website,x_handle,trigger,post_url,post_title,post_text,posted_at,listen_source,listen_watch");
     writeFileSync(file, text.replace("twitter_search:1850,Dana,Dana Reyes,,", "twitter_search:1850,Dana,Dana Reyes,Clearview Tint,"));
@@ -116,5 +116,13 @@ describe("matches as prospects", () => {
     expect(plan.due.map((r) => r.key)).toEqual(["x:clearviewtint"]);
     expect(plan.due[0]!.text).toContain('Saw your post on X: "Is there a booking page that turns Google reviews into appointments?".');
     expect(plan.due[0]!.text).toContain("for Clearview Tint?");
+  });
+
+  test("two watches with the same name keep a list each", async () => {
+    const twin = { ...delivery, watch: { id: "01JTWIN", name: "Needs booking software" }, items: [{ key: "hackernews:991", source: { label: "Hacker News", kind: "hackernews" }, item: { occurred_at: "2026-11-02T14:40:00Z", title: "Ask HN: booking software for a small shop?", url: "https://news.ycombinator.com/item?id=991", author: "pg_fan" } }] };
+    expect((await post(twin, { authorization: "Bearer a-long-listening-secret" })).status).toBe(200);
+    const { data } = await call<{ source: string; added: number; rows: number }>("POST", "/api/listen/export", { watch: "01JTWIN" });
+    expect(data).toMatchObject({ source: "csv:prospects-listen-needs-booking-software-01jtwin.csv", added: 1, rows: 1 });
+    expect(readFileSync(path.join(root, "prospects-listen-needs-booking-software-01jwatch.csv"), "utf8")).not.toContain("hackernews:991");
   });
 });

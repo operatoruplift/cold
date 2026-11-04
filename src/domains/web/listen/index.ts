@@ -69,7 +69,9 @@ export function listenRoutes(ctx: WebContext): Route[] {
         const name = watch === "all" ? "all" : (await ctx.listening.watches()).find((w) => w.id === watch)?.name;
         if (!name) throw new HttpError(404, "No matches have come in from that watch yet.");
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "matches";
-        const file = `prospects-listen-${slug}.csv`;
+        // One list per watch, named for it and its id: two watches with the same name never share a list.
+        const id = watch.toLowerCase().replace(/[^a-z0-9-]+/g, "-").slice(-40).replace(/^-+|-+$/g, "") || "watch";
+        const file = watch === "all" ? "prospects-listen-all.csv" : `prospects-listen-${slug}-${id}.csv`;
         const existing = await ctx.files.read(file).catch(() => undefined);
         const { text, added, rows } = listenCsv(await ctx.listening.items({ watch: watch === "all" ? undefined : watch, limit: 5000 }), existing);
         await ctx.files.write(file, text);

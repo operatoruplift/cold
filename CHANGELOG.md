@@ -67,8 +67,9 @@
   delivered, and each watch is a prospect source, `listen:<watch>`: the
   trigger line is the post itself, quoted, and a post on X carries its
   author's handle for an X DM. **Save as a list** in Settings writes a
-  watch's matches to one of your own lists to fill in and research; saving
-  again only adds what is new. Prospect sources are defined once, so
+  watch's matches to one of your own lists to fill in and research, one
+  list per watch even when two share a name; saving again only adds what is
+  new. Prospect sources are defined once, so
   research and campaigns accept the same ones.
 - **X DMs go out from COLD.** Add your own X developer app in Settings
   (`X_CLIENT_ID`, `X_CLIENT_SECRET`) and press **Connect X** for an account:
