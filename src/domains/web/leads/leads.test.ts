@@ -128,4 +128,16 @@ describe("lead routes", () => {
       else process.env.TWENTY_API_KEY = saved.twentyKey;
     }
   });
+
+  test('a lead who said "do not call" on the dialer is Do Not Contact on Calls, and goes last', async () => {
+    const config = await ctx.requireConfig();
+    await (await ctx.store(config)).record({ kind: "OPTED_OUT", channel: "CALL", prospectKey: "agencyLeads:sam", templateId: "dialer:DNC", subject: "Do not call", occurredAt: "2026-11-01T17:50:00.000Z" });
+    const { data } = await call<LeadsResponse>("GET", "/api/leads");
+    expect(data.leads.map((l) => [l.id, l.doNotContact])).toEqual([
+      ["ana", false],
+      ["dq", false],
+      ["sam", true],
+    ]);
+    expect(data.leads[2]).toMatchObject({ callOutcome: "Do not call" });
+  });
 });

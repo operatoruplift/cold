@@ -46,6 +46,15 @@ describe("leadNote", () => {
     expect(note.fields.utm_source).toBe("facebook");
   });
 
+  test("answers written on one line read the same as answers over several, braces and quotes in an answer included", () => {
+    const answers = { "Cars a week": "10-20", Services: ["Tint", "Wraps"], "Anything else?": 'Need a {rush} "quote"' };
+    const note = leadNote(offerNote({ name: "Sam Lee" }, `Quiz answers: ${JSON.stringify(answers)}`));
+    expect(note.answers).toEqual({ "Cars a week": "10-20", Services: "Tint, Wraps", "Anything else?": 'Need a {rush} "quote"' });
+    expect(note.answers).toEqual(leadNote(offerNote({ name: "Sam Lee" }, answers)).answers);
+    expect(note.fields.quiz_answers).toBeUndefined();
+    expect(note.fields.utm_source).toBe("facebook");
+  });
+
   test("no note at all", () => {
     expect(leadNote(undefined)).toEqual({ name: undefined, email: undefined, phone: undefined, answers: {}, fields: {} });
   });

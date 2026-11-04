@@ -1,13 +1,18 @@
 import { callTime } from "../../callHours";
 import type { CallHours } from "../../config";
 import { leadNote, type Prospect } from "../../prospects";
-import { callOutcome, DISPOSITION_LABELS, type Touch } from "../../touches";
+import { callOutcome, DISPOSITION_LABELS, suppressionReason, type Touch } from "../../touches";
 import type { NtfyMessage, QuizLead } from "../types";
 
 const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
-/** One quiz lead for the Calls page: its record in Twenty, as a prospect, its last call, and whether it can be called now. Pure. */
-export function quizLead(record: Record<string, unknown>, prospect: Prospect, call?: Touch, clock?: { hours: CallHours; now: Date }): QuizLead {
+/**
+ * One quiz lead for the Calls page: its record in Twenty, as a prospect, its
+ * last call, and whether it can be called now. It is Do Not Contact when its
+ * business is, when the dialer logged "do not call", or when any of its
+ * identities opted out in the touch log (`suppressions`). Pure.
+ */
+export function quizLead(record: Record<string, unknown>, prospect: Prospect, call?: Touch, clock?: { hours: CallHours; now: Date }, suppressions: Touch[] = []): QuizLead {
   const outcome = call && callOutcome(call);
   const v = prospect.variables;
   const qualification = (text(record.qualificationStatus) ?? "").toUpperCase();
@@ -26,7 +31,7 @@ export function quizLead(record: Record<string, unknown>, prospect: Prospect, ca
     from: v.utm_source ?? v.lead_source,
     calledAt: call?.occurredAt,
     callOutcome: outcome ? DISPOSITION_LABELS[outcome] : undefined,
-    doNotContact: prospect.doNotContact,
+    doNotContact: !!suppressionReason(prospect, call ? [...suppressions, call] : suppressions, "CALL"),
     callTime: clock ? callTime(prospect, clock.hours, clock.now) : undefined,
   };
 }

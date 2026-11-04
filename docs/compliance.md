@@ -87,7 +87,9 @@ within 5 business days.
 - **Keep an internal do-not-call list.** That is the dialer's Do Not Contact
   status, and `cold` respects it. A call the dialer marks "do not call" is
   logged in `cold` as an opt-out (every ten minutes, or `cold call log`), so
-  no email or DM goes to them either.
+  no email or DM goes to them either. A quiz lead who opted out anywhere,
+  "do not call" included, shows as Do Not Contact on Calls, with no Call
+  button, and gets no new-lead push.
 
 ## DMs and platform rules
 
