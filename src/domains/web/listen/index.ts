@@ -14,6 +14,35 @@ function sameSecret(given: string | null, expected: string): boolean {
 }
 
 /**
+ * The body as text, read until it passes `max` bytes: undefined then, and the
+ * rest is never read, so a body without a Content-Length (sent in chunks) is
+ * refused without holding all of it in memory first.
+ */
+async function readCapped(request: Request, max: number): Promise<string | undefined> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/**
  * OpenMagpie's webhook action delivers matches here (POST, instant or
  * digest). It proves itself with `Authorization: Bearer <COLD_LISTEN_SECRET>`,
  * set in the action's headers. Delivery is at least once: a key already kept
@@ -25,9 +54,10 @@ export function listenWebhook(ctx: WebContext): (request: Request) => Promise<Re
     if (!secret) return json({ error: "Listening is not set up here: set COLD_LISTEN_SECRET in cold's Settings, and the same value in OpenMagpie's webhook headers." }, 503);
     if (!sameSecret(request.headers.get("authorization"), `Bearer ${secret}`)) return json({ error: "Not for you: the Authorization header must be Bearer and COLD_LISTEN_SECRET." }, 401);
     if (!ctx.listening) return json({ error: "This server has no database to keep matches." }, 503);
-    if (Number(request.headers.get("content-length") ?? 0) > MAX_LISTEN_BYTES) return json({ error: "That delivery is too large: use a shorter digest interval." }, 413);
-    const text = await request.text();
-    if (text.length > MAX_LISTEN_BYTES) return json({ error: "That delivery is too large: use a shorter digest interval." }, 413);
+    const tooLarge = () => json({ error: "That delivery is too large: use a shorter digest interval." }, 413);
+    if (Number(request.headers.get("content-length") ?? 0) > MAX_LISTEN_BYTES) return tooLarge();
+    const text = await readCapped(request, MAX_LISTEN_BYTES);
+    if (text === undefined) return tooLarge();
     let body: unknown;
     try {
       body = JSON.parse(text);

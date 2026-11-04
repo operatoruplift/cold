@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { openDatabase } from "../../db";
+import { MAX_LISTEN_BYTES } from "../../listen";
 import { createApi } from "../api";
 import { WebContext } from "../context";
 import type { Campaign, ListenStatusResponse, PlanResponse, ProspectSummary, SourceOption } from "../types";
@@ -63,6 +64,23 @@ describe("OpenMagpie's webhook", () => {
     expect((await post(delivery)).status).toBe(401);
     expect((await post(delivery, { authorization: "Bearer wrong" })).status).toBe(401);
     expect(await ctx.listening!.items()).toEqual([]);
+  });
+
+  test("a delivery over the size limit is refused while it is read, sent in chunks with no Content-Length too", async () => {
+    process.env.COLD_LISTEN_SECRET = "a-long-listening-secret";
+    const chunk = new Uint8Array(64 * 1024).fill(32);
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (++pulled > 100) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+    const request = new Request(`${ORIGIN}/api/listen/magpie`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer a-long-listening-secret" }, body, duplex: "half" } as RequestInit);
+    expect(request.headers.get("content-length")).toBeNull();
+    const response = await webhook(request);
+    expect(response.status).toBe(413);
+    expect(pulled * chunk.byteLength).toBeLessThan(MAX_LISTEN_BYTES + 4 * chunk.byteLength);
   });
 
   test("a delivery is kept, and the same delivery again adds nothing", async () => {
