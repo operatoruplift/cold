@@ -1,6 +1,6 @@
 import { PLATFORMS, VOICES, type Platform, type Voice } from "../../messages";
 import { VARIABLES } from "../../render";
-import { DEFAULT_DECIDE, WEEKDAYS, type Account, type ColdConfig, type DecideSettings, type DmSettings, type EmailSettings, type Offer, type SendWindow, type StoreKind, type Weekday } from "../types";
+import { DEFAULT_CALL_HOURS, DEFAULT_DECIDE, WEEKDAYS, type Account, type CallHours, type ColdConfig, type DecideSettings, type DmSettings, type EmailSettings, type Offer, type SendWindow, type StoreKind, type Weekday } from "../types";
 
 const ACCOUNT_VARIABLES = new Set(VARIABLES.filter((v) => v.scope === "account").map((v) => v.name));
 const OFFER_VARIABLES = new Set(VARIABLES.filter((v) => v.scope === "offer").map((v) => v.name));
@@ -56,10 +56,11 @@ export function parseConfig(raw: unknown, file: string, isExample = false): { co
   if (!["auto", "twenty", "file"].includes(store)) errors.push("store: must be auto, twenty or file");
 
   const decide = parseDecide(raw.decide, errors);
+  const calls = parseCalls(raw.calls, errors);
 
   if (errors.length) return { errors };
   return {
-    config: { file, isExample, accounts, offers, defaultOffer, store, logFile: text(raw.log_file) || ".cold/touches.jsonl", decide },
+    config: { file, isExample, accounts, offers, defaultOffer, store, logFile: text(raw.log_file) || ".cold/touches.jsonl", decide, calls },
     errors,
   };
 }
@@ -165,6 +166,26 @@ function isTimezone(name: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The optional calls: section: when to call, in each prospect's own time. Every key has a default. */
+function parseCalls(raw: unknown, errors: string[]): CallHours {
+  if (raw === undefined || raw === null) return { ...DEFAULT_CALL_HOURS, days: [...DEFAULT_CALL_HOURS.days] };
+  if (!isObject(raw)) {
+    errors.push("calls: must be a mapping (start, end, days)");
+    return { ...DEFAULT_CALL_HOURS };
+  }
+  for (const key of Object.keys(raw)) if (!["start", "end", "days"].includes(key)) errors.push(`calls.${key}: not a calls setting (start, end, days)`);
+  const start = text(raw.start) || DEFAULT_CALL_HOURS.start;
+  const end = text(raw.end) || DEFAULT_CALL_HOURS.end;
+  if (!TIME.test(start) || !TIME.test(end) || start >= end) errors.push('calls: start and end as "HH:MM" in the prospect\'s time, start before end, e.g. start: "08:00", end: "21:00"');
+  let days = [...DEFAULT_CALL_HOURS.days];
+  if (raw.days !== undefined) {
+    const given = Array.isArray(raw.days) ? raw.days.map((d) => text(d).toLowerCase()) : [];
+    if (!given.length || !given.every((d) => WEEKDAYS.includes(d as Weekday))) errors.push("calls.days: a list like [mon, tue, wed, thu, fri, sat]");
+    else days = given as Weekday[];
+  }
+  return { start, end, days };
 }
 
 /** The optional decide: section. Every key has a default, so it can be left out entirely. */

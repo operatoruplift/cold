@@ -92,6 +92,15 @@ describe("planSequence", () => {
     expect(plan([p], [sent(p, 1, ago(5)), byHand]).skipped[0]!.reason).toMatch(/^replied on .*\(linkedin\)/);
   });
 
+  test("a call where you talked with them holds every sequence like a reply; a voicemail does not", () => {
+    const dana = prospect("1", "dana@clearview.example");
+    const call = (disposition: string, at: string): Touch => ({ kind: "CALLED", channel: "CALL", templateId: `dialer:${disposition}`, prospectKey: dana.key, occurredAt: at });
+    expect(plan([dana], [sent(dana, 1, ago(2)), call("NOT_INTERESTED", ago(1))]).skipped[0]?.reason).toBe(`talked on the phone on ${ago(1).slice(0, 10)} (not interested); carry on by hand`);
+    expect(plan([dana], [call("APPOINTMENT_SET", ago(5))]).skipped[0]?.reason).toStartWith("talked on the phone");
+    expect(plan([dana], [call("VOICEMAIL", ago(1))]).due).toHaveLength(1);
+    expect(plan([dana], [call("INTERESTED", ago(120))]).due).toHaveLength(1);
+  });
+
   test("a reply in the last 90 days holds every new sequence; an older one does not", () => {
     const p = prospect("a", "a@x.example");
     const reply: Touch = { kind: "REPLIED", channel: "LINKEDIN", sequence: "dm/personal/linkedin", prospectKey: p.key, occurredAt: ago(20) };

@@ -4,7 +4,7 @@
  * accounts, with every touch kept in Twenty. `bun run cold help` for usage.
  */
 import { parseArgs } from "node:util";
-import { callSheet, syncCallScripts } from "./domains/call";
+import { callOutcomeLines, callSheet, syncCallOutcomes, syncCallScripts } from "./domains/call";
 import { bold, cyan, dim, green, indent, red, table, terminalIo, yellow } from "./domains/cli/io";
 import { getAccount, getOffer, loadConfig, loadEnvFiles, type Account, type ColdConfig } from "./domains/config";
 import { runDm } from "./domains/dm";
@@ -45,6 +45,7 @@ ${bold("DMs")}
 ${bold("Calls")}
   cold call sync [--account <a>] [--offer <o>] [--campaign <name>] [--dry-run]
   cold call sheet <script> [--account <a>] [--offer <o>] [--source <src> --prospect <who>]
+  cold call log [--days 14] [--dry-run]           the dialer's calls into the touch log
 
 ${bold("Login")} (for the app at /app/)
   cold owner [--email <you@x.com>]  create or reset your login, then sign in with it
@@ -338,10 +339,20 @@ async function call(sub: string | undefined, id: string | undefined): Promise<nu
       prospect = flags.prospect ? findProspect(all, flags.prospect) : undefined;
       if (flags.prospect && !prospect) throw new UsageError(`No prospect matching "${flags.prospect}"`);
     }
-    io.log(callSheet(script, lib, account, getOffer(config, flags.offer), prospect));
+    io.log(callSheet(script, lib, account, getOffer(config, flags.offer), prospect, { hours: config.calls, now: new Date() }));
     return 0;
   }
-  throw new UsageError("cold call sync | sheet <script>");
+  if (sub === "log") {
+    const client = twentyClient();
+    if (!client) throw new UsageError("Set TWENTY_BASE_URL and TWENTY_API_KEY in .env.local: the dialer keeps its calls in Twenty.");
+    const dryRun = !!flags["dry-run"];
+    const sync = await syncCallOutcomes({ client, store: await openStore(config), now: new Date(), days: int("days", flags.days, 14)!, dryRun });
+    for (const line of callOutcomeLines(sync)) io.log(line);
+    const n = sync.logged.length;
+    io.log(n ? green(`${dryRun ? "Would log" : "Logged"} ${n} call${n === 1 ? "" : "s"} from the dialer.`) : dim(`No new calls to log${sync.known ? ` (${sync.known} already logged)` : ""}.`));
+    return 0;
+  }
+  throw new UsageError("cold call sync | sheet <script> | log");
 }
 
 async function stats(): Promise<number> {

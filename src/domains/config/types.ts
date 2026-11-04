@@ -14,6 +14,17 @@ export interface SendWindow {
   timezone: string;
 }
 
+/** When to call, in each prospect's own time zone. The US rule is 8am to 9pm; other countries set their own. */
+export interface CallHours {
+  days: Weekday[];
+  /** "08:00" */
+  start: string;
+  /** "21:00": the first minute calls stop. */
+  end: string;
+}
+
+export const DEFAULT_CALL_HOURS: CallHours = { days: [...WEEKDAYS], start: "08:00", end: "21:00" };
+
 export interface EmailSettings {
   /** "Alex Morgan <alex@brightside.example>" */
   from: string;
@@ -80,4 +91,6 @@ export interface ColdConfig {
   /** The touch log when the store is a file. */
   logFile: string;
   decide: DecideSettings;
+  /** When prospects may be called, in their own time. */
+  calls: CallHours;
 }

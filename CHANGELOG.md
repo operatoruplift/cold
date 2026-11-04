@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+- **Drive COLD from Claude.** `bun run mcp` is an MCP server over stdio
+  (`claude mcp add cold -- bun run --cwd /path/to/cold mcp`), with sixteen
+  tools on COLD's own API, so they keep its rules: status, campaigns and
+  today's plan for each (who is due with the exact message, who is held,
+  waiting or skipped and why), prospect lists, recent activity, results, call
+  scripts and call sheets with the prospect's local time, quiz leads, logging
+  the dialer's calls and DMs sent by hand, and following or stopping a send.
+  Sending is two steps: `cold_send_emails` and `cold_send_x_dm` show what
+  would go out, and send only when called again with `confirm=true` after
+  you say yes. Every answer reads as Markdown, or as COLD's JSON, in pages
+  that stay under 25,000 characters. Built on the MCP TypeScript SDK v2.
+- **The dialer's calls come back.** Every call the dialer logs with an
+  outcome becomes a touch in COLD, on the business's or the quiz lead's
+  timeline: the outcome, the dialer's AI score and tone, and its summary,
+  once the call has settled. It runs every ten minutes in the background (on
+  your computer and on Vercel, once across servers), from **Log calls** on
+  Calls, or with `cold call log`, and a call is never logged twice.
+  - A call where you talked with them (interested, appointment set, call
+    back, not interested) pauses their sequences for 90 days, like a reply.
+  - "Do not call" is an opt-out: nothing goes to them on any channel, and the
+    dialer's prospect is marked Do Not Contact.
+  - The decision engine reads the calls in their history. Someone who opted
+    out is always skipped; "not interested" on a recent call turns reach out
+    now into later; a wrong or bad number is no longer a way to reach them;
+    and skipping someone who was interested goes to you to check.
+  - Quiz leads say how their last call went.
+- **Calls at their hour.** A call sheet for a prospect, in the app and from
+  `cold call sheet`, says what time it is where they are and whether it is
+  inside calling hours: 8am to 9pm every day unless cold.yaml's new `calls:`
+  says otherwise (`start`, `end`, `days`). Outside them it says when hours
+  open ("call from tomorrow 8:00 AM CST"). The time zone comes from a
+  `timezone` column, else from both their phone's area code (from Google's
+  libphonenumber, down to the exchange where an area code is split) and
+  their state or province, and an area that spans zones is called only when
+  it is inside hours in all of them. A number it can't place is said, never
+  guessed. Quiz leads it is too early or late to call drop below the ones you
+  can call now, their Call button waits, and their push says when to call.
+- **Quiz leads get called first.** offer's quiz leads (`agencyLeads` in
+  Twenty) are a prospect source, `twenty:agencyLeads`: the person who took
+  the quiz (never the business's decision maker, when they came through a
+  business's own link), their answers and UTM tags as variables, and "Saw
+  you took our quiz on Nov 2." as the trigger when the business has none.
+  Calls lists the last two weeks' qualified leads nobody has called yet at
+  the top, newest first; picking one fills the script in for them, with a
+  Call button and their answers. With `COLD_NTFY_URL`, a push reaches your
+  phone through ntfy within a minute of each qualified lead (several at once
+  come as one), tapping it opens the lead; it looks once a minute across
+  every server on the database, never pushes a lead twice, retries one that
+  failed, and never pushes leads from before it was set up. Settings, Lead
+  alerts sends a test.
+- **Picking a dialer prospect fills the script in again.** Prospects from
+  `twenty:agencyProspects` and `twenty:agencyPeople` were never found by
+  their key in a call sheet or a research run, so the script kept its
+  braces.
+- **Leads from listening.** OpenMagpie's webhook action delivers the posts
+  its watches match to `/api/listen/magpie` (with `Authorization: Bearer`
+  and `COLD_LISTEN_SECRET`). Each match is kept once, however often it is
+  delivered, and each watch is a prospect source, `listen:<watch>`: the
+  trigger line is the post itself, quoted, and a post on X carries its
+  author's handle for an X DM. **Save as a list** in Settings writes a
+  watch's matches to one of your own lists to fill in and research; saving
+  again only adds what is new. Prospect sources are defined once, so
+  research and campaigns accept the same ones.
 - **X DMs go out from COLD.** Add your own X developer app in Settings
   (`X_CLIENT_ID`, `X_CLIENT_SECRET`) and press **Connect X** for an account:
   a campaign's X queue then has **Send on X**, one approved DM per click,

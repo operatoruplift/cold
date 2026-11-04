@@ -1,6 +1,6 @@
 import { ANGLE_GUIDE, ANGLES, TONE_GUIDE, TONES, type AiOffer, type AiSender, type Angle, type Research, type Tone } from "../ai";
 import type { Prospect } from "../prospects";
-import type { Touch } from "../touches";
+import { DEAD_NUMBERS, DISPOSITION_LABELS, latestCall, type Touch } from "../touches";
 import { historyLines, type Dossier } from "./diligence";
 import { argmax, clamp01 } from "./math";
 import type { Answer, DecisionResult, Question } from "./types";
@@ -38,6 +38,8 @@ export type Tier = "A" | "B" | "C" | "D";
 export const tierOf = (score: number): Tier => (score >= 70 ? "A" : score >= 50 ? "B" : score >= 30 ? "C" : "D");
 /** Below this confidence the next step goes to you to check, as TypeSafe recommends for Jev. */
 export const REVIEW_BELOW = 0.75;
+/** A call outcome from the dialer holds for this long. */
+const CALL_MEMORY_DAYS = 90;
 
 export interface DecisionInput {
   offer: AiOffer;
@@ -80,16 +82,18 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const SHARED_INBOX = /^(info|hello|hi|contact|office|admin|sales|support|team|bookings?|enquiries|inquiries|service|mail|frontdesk|reception)@/i;
 
-/** The channels a prospect can be reached on: an email that hasn't bounced, their profiles, a phone. */
+/** The channels a prospect can be reached on: an email that hasn't bounced, their profiles, a phone the dialer didn't find wrong. */
 export function reachableOn(prospect: Prospect, history: Touch[]): Channel[] {
   const bounced = history.some((t) => t.channel === "EMAIL" && (t.kind === "BOUNCED" || t.kind === "UNDELIVERABLE"));
+  const lastCall = latestCall(history);
+  const deadNumber = !!lastCall && DEAD_NUMBERS.has(lastCall.disposition);
   const found: Array<[Channel, unknown]> = [
     ["email", prospect.email && !bounced],
     ["linkedin", prospect.linkedinUrl],
     ["instagram", prospect.instagramHandle],
     ["x", prospect.xHandle],
     ["facebook", prospect.facebookUrl],
-    ["phone", prospect.phone],
+    ["phone", prospect.phone && !deadNumber],
   ];
   return found.filter(([, ok]) => !!ok).map(([c]) => c);
 }
@@ -207,9 +211,10 @@ export function scoreOf(f: Record<Factor, number>): number {
 
 /**
  * Turn the answers into a decision: the score, the tier, the next step and
- * the style. Rules a model can't overrule: no way to reach them means
- * research first; no fit means skip. A low-confidence or contradictory call
- * goes to you to check.
+ * the style. Rules a model can't overrule: someone who opted out is skipped;
+ * no way to reach them means research first; no fit means skip; someone who
+ * said "not interested" on a call in the last 90 days is not contacted now
+ * but later. A low-confidence or contradictory call goes to you to check.
  */
 export function combine(input: DecisionInput, result: DecisionResult & { provider: "jev" | "claude" }, reviewBelow = REVIEW_BELOW): Decision {
   const a = result.answers;
@@ -232,11 +237,20 @@ export function combine(input: DecisionInput, result: DecisionResult & { provide
   const channel = channels.length > 1 ? choiceOf(a.channel, channels, channels[0]!) : { choice: channels[0] ?? null, confidence: channels.length ? 1 : 0 };
   const evidence: Decision["evidence"] = input.dossier ? "diligence" : input.research ? "research" : "list";
 
+  const call = latestCall(input.history);
+  const recentCall = call && input.now.getTime() - Date.parse(call.touch.occurredAt) < CALL_MEMORY_DAYS * 86_400_000 ? call : undefined;
+  const optedOut = input.history.some((t) => t.kind === "OPTED_OUT");
   let next: Action = action.choice;
+  let because: string | undefined;
   const reviewReasons: string[] = [];
-  if (!channels.length) next = "research_more";
-  else if (factors.fit.value < 0.25) next = "skip";
-  if (next !== action.choice) reviewReasons.push(`The engine suggested "${ACTION_GUIDE[action.choice].label}", overruled because ${channels.length ? "they don't fit the offer" : "there is no way to reach them yet"}.`);
+  if (optedOut) [next, because] = ["skip", "they opted out"];
+  else if (!channels.length) [next, because] = ["research_more", "there is no way to reach them yet"];
+  else if (factors.fit.value < 0.25) [next, because] = ["skip", "they don't fit the offer"];
+  else if (recentCall?.disposition === "NOT_INTERESTED" && next === "contact_now") [next, because] = ["nurture", `they said they weren't interested on a call on ${day(new Date(recentCall.touch.occurredAt))}`];
+  if (next !== action.choice) reviewReasons.push(`The engine suggested "${ACTION_GUIDE[action.choice].label}", overruled because ${because}.`);
+  if (!optedOut && next === "skip" && (recentCall?.disposition === "INTERESTED" || recentCall?.disposition === "APPOINTMENT_SET")) {
+    reviewReasons.push(`It says skip, but the dialer logged "${DISPOSITION_LABELS[recentCall.disposition].toLowerCase()}" on a call on ${day(new Date(recentCall.touch.occurredAt))}.`);
+  }
   if (action.confidence < reviewBelow) reviewReasons.push(`It isn't sure about the next step (confidence ${pct(action.confidence)}).`);
   if (next === "contact_now" && score < 30) reviewReasons.push("It says reach out now, but the score is low.");
   if (next === "skip" && score >= 70) reviewReasons.push("It says skip, but the score is high.");

@@ -29,6 +29,19 @@ describe("parseConfig", () => {
     ]);
   });
 
+  test("the calls section is optional: 8am to 9pm every day, in the prospect's time", () => {
+    expect(parseConfig(example, "x").config!.calls).toEqual({ start: "08:00", end: "21:00", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] });
+    const tuned = parseConfig({ ...example, calls: { start: "09:00", end: "18:30", days: ["Mon", "tue", "wed", "thu", "fri"] } }, "x");
+    expect(tuned.config!.calls).toEqual({ start: "09:00", end: "18:30", days: ["mon", "tue", "wed", "thu", "fri"] });
+    expect(parseConfig({ ...example, calls: { end: "20:00" } }, "x").config!.calls.start).toBe("08:00");
+    const { errors } = parseConfig({ ...example, calls: { start: "21:00", end: "08:00", days: ["funday"], window: 1 } }, "x");
+    expect(errors).toEqual([
+      "calls.window: not a calls setting (start, end, days)",
+      'calls: start and end as "HH:MM" in the prospect\'s time, start before end, e.g. start: "08:00", end: "21:00"',
+      "calls.days: a list like [mon, tue, wed, thu, fri, sat]",
+    ]);
+  });
+
   test("an account without a footer gets the default for its voice", () => {
     const { config } = parseConfig(example, "x");
     expect(config!.accounts.personal!.email!.footer).toBe(DEFAULT_FOOTERS.personal);

@@ -278,6 +278,18 @@ const MIGRATIONS: string[] = [
      created_at TEXT NOT NULL,
      PRIMARY KEY (account, prospect_key, sequence, step)
    );`,
+  // Listening: the matches OpenMagpie's webhook delivers, each key once.
+  `CREATE TABLE listen_items (
+     key TEXT PRIMARY KEY,
+     watch_id TEXT NOT NULL,
+     watch_name TEXT NOT NULL,
+     source_kind TEXT NOT NULL,
+     occurred_at TEXT NOT NULL,
+     received_at TEXT NOT NULL,
+     item TEXT NOT NULL
+   );
+   CREATE INDEX listen_items_watch ON listen_items (watch_id, occurred_at);
+   CREATE INDEX listen_items_newest ON listen_items (occurred_at);`,
 ];
 
 const statements = (script: string): Statement[] =>
@@ -356,6 +368,22 @@ export function databaseFromEnv(env: Record<string, string | undefined> = proces
 }
 
 /** A value stored once and kept: the first call makes it, later calls read it. */
+/**
+ * Claim a job that runs now and then (a look for new leads, logging calls)
+ * for every server on this database: true when it last ran at least
+ * `everyMs` ago (or never), and marks it as running now. Two servers that
+ * ask at once get one true between them.
+ */
+export async function claimRun(db: Db, key: string, now: Date, everyMs: number): Promise<boolean> {
+  const { changes } = await db.run(
+    "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value WHERE meta.value <= ?",
+    key,
+    now.toISOString(),
+    new Date(now.getTime() - everyMs).toISOString(),
+  );
+  return changes > 0;
+}
+
 export async function metaValue(db: Db, key: string, make: () => string): Promise<string> {
   const found = await db.get<{ value: string }>("SELECT value FROM meta WHERE key = ?", key);
   if (found) return found.value;

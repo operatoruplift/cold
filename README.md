@@ -59,6 +59,22 @@ call scripts and the Do Not Contact list.
   web search, and every claim comes with the page it was read on. Drafts,
   call prep and reply answers wait for your approval; nothing goes out on its
   own.
+- **Leads from listening.** Point a watch in
+  [OpenMagpie](https://github.com/obris-dev/openmagpie) (the self-hostable
+  listener behind ListeningKit) at COLD's webhook, and every post where
+  someone asks for what you sell comes in as a prospect whose trigger line is
+  the post itself, with its link. A post on X can be answered with an X DM;
+  save a watch as a list to fill in the rest (company, email) and research it.
+- **Calls at their hour.** Every call sheet says what time it is for the
+  prospect, from their phone's area code or their state, and when calling
+  hours open if they are closed (8am to 9pm by default, `calls:` in
+  cold.yaml). Areas that span zones are called when every zone is awake.
+- **Quiz leads get called first.** Leads from your
+  [offer](https://github.com/matthewdonsemail-lab/offer) quiz funnel are a
+  prospect source (`twenty:agencyLeads`) with their answers as variables,
+  listed at the top of Calls, newest first, until someone calls them. Set
+  `COLD_NTFY_URL` and a push reaches your phone ([ntfy](https://ntfy.sh)) a
+  minute after each qualified lead comes in, with their number.
 - **The messages are the product.** 45 messages across cold email, LinkedIn,
   X, Instagram and Facebook DMs, and call scripts, plus 11 objection answers. Every
   channel is covered twice, once as you and once as the company. Each message
@@ -93,6 +109,10 @@ call scripts and the Do Not Contact list.
 - **Calls in the dialer.** One command writes the call scripts and objection
   answers into the dialer's `agencyScripts`, so they sit next to every live
   call. For a handset, `cold call sheet` prints one filled in for a prospect.
+  Every call the dialer makes comes back into the touch log with its outcome
+  and the dialer's AI summary: talking with someone pauses their sequences
+  like a reply, "do not call" is an opt-out on every channel, and the
+  decision engine reads the calls when it scores them.
 - **It tells you what works.** `cold stats` shows the reply rate of every
   message and every sequence, so you keep the winners and rewrite the rest.
 - **Checked like code.** `bun run check` type-checks, runs the tests (including
@@ -324,6 +344,33 @@ bun run cold email run founder-direct --source csv:examples/prospects.csv --dry-
 - Drop `--dry-run` to send. Nothing sends until `cold.yaml` exists and you
   confirm the batch.
 
+### From Claude (MCP)
+
+`bun run mcp` serves COLD to Claude, or any MCP client, over stdio: the same
+files, database and rules as the app, from your computer. Add it to Claude
+Code:
+
+```bash
+claude mcp add cold -- bun run --cwd /path/to/cold mcp
+```
+
+Or to Claude Desktop, in `claude_desktop_config.json` (give bun's full path,
+`~/.bun/bin/bun`, when Desktop can't find it, and `COLD_HOME` when your files
+live elsewhere):
+
+```json
+{ "mcpServers": { "cold": { "command": "bun", "args": ["run", "--cwd", "/path/to/cold", "mcp"] } } }
+```
+
+Then ask in plain words: "what's going out today on the tint campaign?",
+"prep me to call Sam", "which quiz leads haven't been called?", "log the
+dialer's calls". It reads your status, campaigns and their plan for today,
+prospect lists, activity, results, call scripts and sheets (with each
+prospect's local time) and quiz leads; logs the dialer's calls and DMs you
+sent by hand; and follows or stops a send. Sends wait for you:
+`cold_send_emails` and `cold_send_x_dm` only show what would go out, and go
+out only when called again with `confirm=true` after you have said yes.
+
 ## A day with it
 
 ```bash
@@ -501,7 +548,9 @@ records go to `.cold/touches.jsonl`.
 | `cold email verify` | Check addresses with Reacher (`--record` suppresses invalid ones) |
 | `cold dm run <sequence>` | Work through today's DMs, or `--export` a checklist for a VA |
 | `cold call sync` | Write the call scripts into the dialer |
-| `cold call sheet <script>` | Print a call script and every objection answer |
+| `cold call sheet <script>` | Print a call script and every objection answer, with the prospect's local time |
+| `cold call log` | Log the dialer's calls, with their outcomes, into the touch log (`--dry-run` to check) |
+| `bun run mcp` | COLD as an MCP server for Claude, over stdio (see [From Claude](#from-claude-mcp)) |
 | `cold stats` | Reply rate per message and per sequence |
 | `cold log <prospect>` | Log a touch by hand (a reply on the phone, an opt-out) |
 
@@ -577,7 +626,12 @@ src/
     outreach/             variables and rendering per prospect
     email/                build, send, sync replies, verify
     dm/                   the DM queue
-    call/                 dialer script sync and call sheets
+    call/                 dialer script sync, call sheets, and the dialer's calls into the touch log
+    callHours/            each prospect's local time and calling hours (phone prefix zones from libphonenumber)
+    leads/                offer's quiz leads: the call-first list and the ntfy push
+    listen/               OpenMagpie's listening matches, kept once each
+    xApi/                 X's official API: OAuth 2.0 sign-in and DMs
+    mcp/                  COLD as an MCP server: the tools, over its own API
     stats/                reply rates
     twenty/               the API client and the schema
     cli/                  terminal input and output

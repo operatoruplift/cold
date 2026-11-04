@@ -160,11 +160,20 @@ it ranks well.
 
 ### The next step, and when you check
 
-The model suggests the next step; two rules overrule it: no way to reach them
-is always **research first**, and a fit under 25% is always **skip**. A call
-goes to you to **check** when the model is less sure than `review_below` (75%,
-the threshold TypeSafe recommends for Jev), when the score and the step
-disagree, or when only the list was known about them.
+The model suggests the next step; these rules overrule it: someone who opted
+out (by email, or "do not call" in the dialer) is always **skip**, no way to
+reach them is always **research first**, a fit under 25% is always **skip**,
+and someone who said "not interested" on a call in the last 90 days is
+**later**, never reach out now. A call goes to you to **check** when the
+model is less sure than `review_below` (75%, the threshold TypeSafe
+recommends for Jev), when the score and the step disagree, when it says skip
+someone the dialer logged as interested, or when only the list was known
+about them.
+
+The dialer's calls are part of what the model reads: each one in the history
+with its outcome, the dialer's AI score and tone, and its summary. A wrong or
+bad number stops counting the phone as a way to reach them, which lowers
+their reach score.
 
 Anyone marked Do Not Contact, or who ever opted out, is never researched or
 scored.

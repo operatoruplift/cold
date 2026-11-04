@@ -1,5 +1,5 @@
 /** Where prospects come from. */
-export type ProspectSourceKind = "csv" | "people" | "agencyProspects" | "agencyPeople";
+export type ProspectSourceKind = "csv" | "people" | "agencyProspects" | "agencyPeople" | "agencyLeads" | "listen";
 
 /** Twenty record ids a touch is linked to, so it shows on the right timelines. */
 export interface ProspectLinks {
@@ -7,6 +7,8 @@ export interface ProspectLinks {
   companyId?: string;
   agencyProspectId?: string;
   agencyPersonId?: string;
+  /** offer's quiz lead, when the prospect is one. */
+  agencyLeadId?: string;
 }
 
 export interface Prospect {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { AiError, AiStore, aiConfigured, claudeCall, type MessagesCall } from "../../ai";
-import { APP_ROOT, configFromText, type Account, type ColdConfig, type DecideSettings } from "../../config";
+import { APP_ROOT, configFromText, DEFAULT_CALL_HOURS, type Account, type ColdConfig, type DecideSettings } from "../../config";
 import type { Db } from "../../db";
 import { claudeDecider, DecideStore, jevConfigured, jevProvider, subqConfigured, subqReader, type CollectOptions, type DecisionProvider, type LongReader } from "../../decide";
 import { reacherFromEnv, smtpTransport, type MailTransport } from "../../email";
@@ -10,6 +10,10 @@ import { loadProspects, prospectsFromCsv, type Prospect } from "../../prospects"
 import { DbFiles, DiskFiles, EnvFileSecrets, secretKey, type Files, type Secrets } from "../../storage";
 import { DbStore, filesJournal, openStore, twentyClient, TwentyStore, type TouchStore } from "../../touches";
 import { xAppFromEnv, XClient, XStore, type XFetch } from "../../xApi";
+import { LISTEN_PREFIX, ListenStore, listenProspect } from "../../listen";
+import { LeadWatch } from "../../leads";
+import type { TwentyClient } from "../../twenty";
+import { CallLog } from "../calls/log";
 import { CampaignStore } from "../campaigns";
 import { processScoreItem } from "../decide/engine";
 import { ScoreJobs } from "../decide/jobs";
@@ -33,6 +37,12 @@ export interface WebContextOptions {
   transport?: (account: Account) => MailTransport;
   /** How cold reaches X's API (tests hand it a fake X). */
   xFetch?: XFetch;
+  /** Twenty, when not from TWENTY_BASE_URL and TWENTY_API_KEY (tests hand it a fake). */
+  twenty?: () => TwentyClient | undefined;
+  /** How lead alerts reach ntfy (tests hand it a fake). */
+  ntfyFetch?: typeof fetch;
+  /** The app's address, for links in lead alerts: "https://cold.example.com/app/". */
+  appUrl?: string;
   now?: () => Date;
   random?: () => number;
 }
@@ -79,6 +89,12 @@ export class WebContext {
   readonly scoring?: ScoreJobs;
   /** X connections, sign-ins and sends through X's API; only with the database. */
   readonly x?: XStore;
+  /** Listening matches OpenMagpie delivered; only with the database. */
+  readonly listening?: ListenStore;
+  /** Pushes an alert when one of offer's quiz leads comes in; only with the database. */
+  readonly leads?: LeadWatch;
+  /** Logs the dialer's calls into the touch log; only with the database. */
+  readonly callLog?: CallLog;
   private readonly prospectCache = new Map<string, { at: number; prospects: Prospect[] }>();
   private storeCache?: { at: number; key: string; store: Promise<TouchStore> };
   private kept: { config?: Promise<ConfigState>; library?: ReturnType<typeof loadLibraryFrom> } = {};
@@ -104,7 +120,15 @@ export class WebContext {
         random: options.random,
       });
       this.x = new XStore(options.db, { key: usableSecretKey(), requireKey: this.storage === "database", now: () => this.now() });
+      this.listening = new ListenStore(options.db);
+      this.callLog = new CallLog(this, options.db);
+      this.leads = new LeadWatch({ db: options.db, client: () => this.twenty(), appUrl: options.appUrl, hours: async () => (await this.config()).config?.calls ?? DEFAULT_CALL_HOURS, fetch: options.ntfyFetch, now: () => this.now() });
     }
+  }
+
+  /** Twenty, once TWENTY_BASE_URL and TWENTY_API_KEY are set. */
+  twenty(): TwentyClient | undefined {
+    return this.options.twenty ? this.options.twenty() : twentyClient();
   }
 
   /** X's API through the owner's developer app, once X_CLIENT_ID is set. */
@@ -274,8 +298,13 @@ export class WebContext {
     if (source.startsWith("csv:")) {
       if (where) throw new Error("A Twenty filter only applies to a Twenty source.");
       prospects = prospectsFromCsv((await this.csv(source)).text);
+    } else if (source.startsWith(LISTEN_PREFIX)) {
+      if (where) throw new Error("A Twenty filter only applies to a Twenty source.");
+      if (!this.listening) throw new Error("Listening needs the app's database.");
+      const watch = source.slice(LISTEN_PREFIX.length);
+      prospects = (await this.listening.items({ watch: watch === "all" ? undefined : watch, limit: 2000 })).map(listenProspect);
     } else {
-      prospects = await loadProspects(source, { where: where || undefined, client: twentyClient() });
+      prospects = await loadProspects(source, { where: where || undefined, client: this.twenty() });
     }
     this.prospectCache.set(key, { at: Date.now(), prospects });
     return prospects;

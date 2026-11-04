@@ -1,6 +1,7 @@
 import type { Message, Sequence } from "../../messages";
 import type { Prospect } from "../../prospects";
 import type { Touch, TouchChannel } from "../types";
+import { callOutcome, DISPOSITION_LABELS, isConversation } from "./callOutcome";
 import { addDays, localDay } from "./localDay";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -84,7 +85,9 @@ export function suppressionReason(prospect: Prospect, suppressions: Touch[], cha
  *  - suppressed prospects are skipped (see suppressionReason);
  *  - a reply anywhere in the last 90 days, on any channel and in any
  *    sequence, stops everything automatic: a reply is a conversation, and
- *    that is yours to carry on by hand;
+ *    that is yours to carry on by hand. So does a call the dialer logged
+ *    where you talked with them (interested, appointment, call back, not
+ *    interested);
  *  - a reply, opt-out or bounce in this sequence ends it;
  *  - step N falls due on calendar day `day` after step 1 went out, in the
  *    sender's timezone, and never sooner after step N-1 than the gap
@@ -121,10 +124,12 @@ export function planSequence(input: PlanInput): Plan {
 
     const mine = touchesOf(prospect, input.history);
     const reply = mine
-      .filter((t) => t.kind === "REPLIED" && now.getTime() - new Date(t.occurredAt).getTime() < REPLY_HOLD_DAYS * DAY_MS)
+      .filter((t) => (t.kind === "REPLIED" || isConversation(t)) && now.getTime() - new Date(t.occurredAt).getTime() < REPLY_HOLD_DAYS * DAY_MS)
       .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
     if (reply) {
-      skip(`replied on ${reply.occurredAt.slice(0, 10)}${reply.sequence ? ` (${reply.sequence})` : ` (${reply.channel.toLowerCase()})`}; carry on by hand`);
+      const call = callOutcome(reply);
+      if (call) skip(`talked on the phone on ${reply.occurredAt.slice(0, 10)} (${DISPOSITION_LABELS[call].toLowerCase()}); carry on by hand`);
+      else skip(`replied on ${reply.occurredAt.slice(0, 10)}${reply.sequence ? ` (${reply.sequence})` : ` (${reply.channel.toLowerCase()})`}; carry on by hand`);
       continue;
     }
 

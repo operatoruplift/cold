@@ -22,7 +22,11 @@ import { aiRoutes } from "../ai";
 import { decideRoutes } from "../decide";
 import { createApi } from "../api";
 import { WebContext } from "../context";
-import { xCallback, xRoutes } from "../x";
+import { callRoutes, logCallSync } from "../calls";
+import { leadRoutes, logLeadCheck } from "../leads";
+import { listenRoutes } from "../listen";
+import { publicRoutes } from "../open";
+import { xRoutes } from "../x";
 import { buildAssets, bundle, DIST, readBundle } from "./assets";
 import { clientAddress, createHandler, SetupCode } from "./handler";
 import { serverSettings } from "./settings";
@@ -40,10 +44,14 @@ try {
 const db = await openDatabase(path.join(ROOT, ".cold", "cold.db"));
 const auth = new OwnerAuth(db, { envOwner: OwnerAuth.envOwner() });
 const waitlist = new Waitlist(db);
-const ctx = new WebContext({ root: ROOT, db });
+const ctx = new WebContext({ root: ROOT, db, appUrl: new URL("/app/", settings.publicUrl).href });
 // Sends and scoring jobs are kept in the database: carry on with any that were under way when the server last stopped.
 setInterval(() => void ctx.sends?.tick().catch((err) => console.error("send:", err)), 5000).unref();
 setInterval(() => void ctx.scoring?.tick().catch((err) => console.error("scoring:", err)), 5000).unref();
+// New quiz leads: a look a minute, once alerts are set up (COLD_NTFY_URL).
+setInterval(() => void ctx.leads?.tick().then(logLeadCheck, (err) => console.error("leads:", err)), 5000).unref();
+// The dialer's calls into the touch log, every ten minutes once Twenty is connected.
+setInterval(() => void ctx.callLog?.tick().then(logCallSync, (err) => console.error("calls:", err)), 5000).unref();
 // In production the site and the app come ready from `bun run build` (the Dockerfile runs it), so the
 // server starts faster and smaller. Otherwise they're bundled now, so `bun run ui` shows your latest changes.
 const bundled = (process.env.NODE_ENV === "production" && readBundle(path.join(APP_ROOT, DIST))) || (await bundle(APP_ROOT));
@@ -61,10 +69,10 @@ const handler = createHandler({
   version: assets.version,
   auth,
   waitlist,
-  privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx)]),
+  privateApi: createApi(ctx, [...aiRoutes(ctx), ...decideRoutes(ctx), ...xRoutes(ctx), ...listenRoutes(ctx), ...leadRoutes(ctx), ...callRoutes(ctx)]),
   setup,
   clientIp: clientAddress(settings.proxyHops, (request) => server.requestIP(request)?.address),
-  xCallback: xCallback(ctx),
+  publicRoutes: publicRoutes(ctx),
 });
 
 try {
