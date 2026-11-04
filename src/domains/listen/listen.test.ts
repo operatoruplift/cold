@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { openDatabase } from "../db";
+import { openDatabase, type Db } from "../db";
 import { ListenStore, listenProspect, quoteOf, readMagpie, triggerOf, type ListenItem } from ".";
 
 const NOW = new Date("2026-11-02T15:00:00Z");
@@ -92,5 +92,18 @@ describe("the matches kept", () => {
     expect((await store.items()).map((i) => i.key)).toEqual(["twitter_search:1850", "reddit_subreddit:t3_abc", "github_search:42", "rss:entry-9"]);
     expect((await store.items({ watch: "nope" })).length).toBe(0);
     expect(await store.watches()).toEqual([{ id: "01JWATCH", name: "Needs booking software", count: 4, latest: NOW.toISOString() }]);
+  });
+
+  test("a delivery is kept a hundred matches to a statement, a match twice in one delivery once", async () => {
+    const db = await openDatabase(":memory:");
+    let statements = 0;
+    const counted: Db = { get: db.get.bind(db), all: db.all.bind(db), batch: db.batch.bind(db), close: db.close.bind(db), run: (sql, ...params) => (statements++, db.run(sql, ...params)) };
+    const store = new ListenStore(counted);
+    const [first] = readMagpie(digest, NOW).items;
+    const many = Array.from({ length: 250 }, (_, i) => ({ ...first!, key: `reddit_subreddit:t3_${i}` }));
+    expect(await store.receive([...many, many[0]!])).toEqual({ added: 250 });
+    expect(statements).toBe(3);
+    expect(await store.receive(many)).toEqual({ added: 0 });
+    expect((await store.items({ limit: 5000 })).length).toBe(250);
   });
 });
