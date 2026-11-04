@@ -168,12 +168,15 @@ function isTimezone(name: string): boolean {
   }
 }
 
+/** The default calling hours as a config's own copy, so nothing that edits one config's days edits the defaults. */
+const defaultCallHours = (): CallHours => ({ ...DEFAULT_CALL_HOURS, days: [...DEFAULT_CALL_HOURS.days] });
+
 /** The optional calls: section: when to call, in each prospect's own time. Every key has a default. */
 function parseCalls(raw: unknown, errors: string[]): CallHours {
-  if (raw === undefined || raw === null) return { ...DEFAULT_CALL_HOURS, days: [...DEFAULT_CALL_HOURS.days] };
+  if (raw === undefined || raw === null) return defaultCallHours();
   if (!isObject(raw)) {
     errors.push("calls: must be a mapping (start, end, days)");
-    return { ...DEFAULT_CALL_HOURS };
+    return defaultCallHours();
   }
   for (const key of Object.keys(raw)) if (!["start", "end", "days"].includes(key)) errors.push(`calls.${key}: not a calls setting (start, end, days)`);
   const start = text(raw.start) || DEFAULT_CALL_HOURS.start;
