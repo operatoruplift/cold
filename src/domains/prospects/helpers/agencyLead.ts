@@ -23,15 +23,38 @@ export interface LeadNote {
 }
 
 /**
+ * The JSON object after "Quiz answers:", whether it is written on one line or
+ * over several: from its "{" to the brace that closes it, skipping braces
+ * inside strings. Undefined when it never closes (a note cut short). Pure.
+ */
+function answersJson(text: string): string | undefined {
+  const found = /Quiz answers:\s*\{/.exec(text);
+  if (!found) return undefined;
+  const start = found.index + found[0].length - 1;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return text.slice(start, i + 1);
+  }
+  return undefined;
+}
+
+/**
  * offer's agencyLead note, read back (backend/src/routes/leads.ts writes it):
  * "Name: …", "Email: …", "Phone: …" ("—" when empty), "Quiz answers: {json}",
  * then one "Label: value" line each for the offer, source URL and UTM tags.
- * Pure.
+ * The answers' JSON can be on one line or several. Pure.
  */
 export function leadNote(note: string | undefined): LeadNote {
   const text = note ?? "";
   const answers: Record<string, string> = {};
-  const json = /Quiz answers: (\{[\s\S]*?\n\})/.exec(text)?.[1];
+  const json = answersJson(text);
   if (json) {
     try {
       for (const [k, v] of Object.entries(JSON.parse(json) as Rec)) {
